@@ -81,7 +81,7 @@ function get_cell_style(styles/*:Array<any>*/, cell/*:Cell*/, opts) {
 	return len;
 }
 
-function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, opts, themes, styles) {
+function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, opts, themes, styles, cellFormat) {
 	try {
 		if(opts.cellNF) p.z = table_fmt[fmtid];
 	} catch(e) { if(opts.WTF) throw e; }
@@ -107,6 +107,10 @@ function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, opts, the
 		else p.w = SSF_format(fmtid,p.v,_ssfopts);
 	} catch(e) { if(opts.WTF) throw e; }
 	if(!opts.cellStyles) return;
+	if (cellFormat) {
+		p.font = styles.Fonts[cellFormat.fontId];
+		p.alignment = cellFormat.alignment;
+	}
 	if(fillid != null) try {
 		p.s = styles.Fills[fillid];
 		if (p.s.fgColor && p.s.fgColor.theme && !p.s.fgColor.rgb) {
