@@ -24,7 +24,7 @@ FLOWTARGET=$(LIB).flow.js
 FLOWAUX=$(patsubst %.js,%.flow.js,$(AUXTARGETS))
 AUXSCPTS=xlsxworker.js
 FLOWTGTS=$(TARGET) $(AUXTARGETS) $(AUXSCPTS) $(MINITGT)
-UGLIFYOPTS=--support-ie8 -m
+UGLIFYOPTS=--ie8 -m
 CLOSURE=/usr/local/lib/node_modules/google-closure-compiler/compiler.jar
 
 ## Main Targets
@@ -79,26 +79,25 @@ DISTHDR=misc/suppress_export.js
 dist: dist-deps $(TARGET) bower.json ## Prepare JS files for distribution
 	mkdir -p dist
 	cp LICENSE dist/
-	uglifyjs shim.js $(UGLIFYOPTS) -o dist/shim.min.js --preamble "$$(head -n 1 bits/00_header.js)"
+	uglifyjs shim.js $(UGLIFYOPTS) -o dist/shim.min.js
 	@#
 	<$(TARGET) sed "s/require('.*')/undefined/g;s/ process / undefined /g;s/process.versions/({})/g" > dist/$(TARGET)
 	<$(MINITGT) sed "s/require('.*')/undefined/g;s/ process / undefined /g;s/process.versions/({})/g" > dist/$(MINITGT)
 	@# core
-	uglifyjs $(REQS) dist/$(TARGET) $(UGLIFYOPTS) -o dist/$(LIB).core.min.js --source-map dist/$(LIB).core.min.map --preamble "$$(head -n 1 bits/00_header.js)"
+	uglifyjs $(REQS) dist/$(TARGET) $(UGLIFYOPTS) -o dist/$(LIB).core.min.js --source-map
 	misc/strip_sourcemap.sh dist/$(LIB).core.min.js
 	@# full
 	#cat <(head -n 1 bits/00_header.js) $(DISTHDR) $(REQS) $(ADDONS) dist/$(TARGET) $(AUXTARGETS) > dist/$(LIB).full.js
-	uglifyjs $(DISTHDR) $(REQS) $(ADDONS) dist/$(TARGET) $(AUXTARGETS) $(UGLIFYOPTS) -o dist/$(LIB).full.min.js --source-map dist/$(LIB).full.min.map --preamble "$$(head -n 1 bits/00_header.js)"
+	uglifyjs $(DISTHDR) $(REQS) $(ADDONS) dist/$(TARGET) $(AUXTARGETS) $(UGLIFYOPTS) -o dist/$(LIB).full.min.js --source-map
 	misc/strip_sourcemap.sh dist/$(LIB).full.min.js
 	@# mini
-	uglifyjs dist/$(MINITGT) $(UGLIFYOPTS) -o dist/$(LIB).mini.min.js --source-map dist/$(LIB).mini.min.map --preamble "$$(head -n 1 bits/00_header.js)"
-	misc/strip_sourcemap.sh dist/$(LIB).mini.min.js
+	uglifyjs dist/$(MINITGT) $(UGLIFYOPTS) -o dist/$(LIB).mini.min.js --source-map
 	@# extendscript
 	cat <(printf '\xEF\xBB\xBF') <(head -n 1 bits/00_header.js) shim.js $(DISTHDR) $(REQS) dist/$(TARGET) > dist/$(LIB).extendscript.js
 	@# zahl
-	cp modules/xlsx.zahl.js modules/xlsx.zahl.mjs dist/
+##	cp modules/xlsx.zahl.js modules/xlsx.zahl.mjs dist/
 	@#
-	rm dist/$(TARGET) dist/$(MINITGT)
+##	rm dist/$(TARGET) dist/$(MINITGT)
 
 .PHONY: dist-deps
 dist-deps: ## Copy dependencies for distribution

@@ -14636,8 +14636,12 @@ function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, opts, the
 	} catch(e) { if(opts.WTF) throw e; }
 	if(!opts.cellStyles) return;
 	if (cellFormat) {
-		p.font = styles.Fonts[cellFormat.fontId];
-		p.alignment = cellFormat.alignment;
+		if (cellFormat.applyFont) {
+			p.font = styles.Fonts[cellFormat.fontId];
+		}
+		if (cellFormat.applyAlignment) {
+			p.alignment = cellFormat.alignment;
+		}
 	}
 	if(fillid != null) try {
 		p.s = styles.Fills[fillid];

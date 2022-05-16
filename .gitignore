@@ -1,6 +1,7 @@
 node_modules
-.idea
-dist
+.idea/
+dist/**
+
 package-lock.json
 *.tgz
 _book/
