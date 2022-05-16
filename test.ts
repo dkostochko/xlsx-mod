@@ -154,6 +154,7 @@ var paths: any = {
 	dnsxml: dir + 'defined_names_simple.xml',
 	dnsxlsx: dir + 'defined_names_simple.xlsx',
 	dnsxlsb: dir + 'defined_names_simple.xlsb',
+	dnsslk: dir + 'defined_names_simple.slk',
 
 	dnuxls: dir + 'defined_names_unicode.xls',
 	dnuxml: dir + 'defined_names_unicode.xml',
@@ -1158,15 +1159,20 @@ Deno.test('parse features', async function(t) {
 		['xlsx', paths.dnsxlsx,  true],
 		['xlsb', paths.dnsxlsb,  true],
 		['xls',  paths.dnsxls,   true],
-		['xlml', paths.dnsxml,  false]
+		['xlml', paths.dnsxml,  false],
+		['slk',  paths.dnsslk,  false]
 	] as Array<[string, string, boolean]>; for(var i = 0; i < dnp.length; ++i) { let m: [string, string, boolean] = dnp[i]; await t.step(m[0], async function(t) {
 		var wb = X.read(fs.readFileSync(m[1]), {type:TYPE});
 		var names = wb?.Workbook?.Names;
-		if(names) {for(var i = 0; i < names?.length; ++i) if(names[i].Name == "SheetJS") break;
+
+		if(names) {
+		if(m[0] != 'slk') {
+		for(var i = 0; i < names?.length; ++i) if(names[i].Name == "SheetJS") break;
 		assert.assert(i < names?.length, "Missing name");
 		assert.equal(names[i].Sheet, void 0);
 		assert.equal(names[i].Ref, "Sheet1!$A$1");
 		if(m[2]) assert.equal(names[i].Comment, "defined names just suck  excel formulae are bad  MS should feel bad");
+		}
 
 		for(i = 0; i < names.length; ++i) if(names[i].Name == "SHEETjs") break;
 		assert.assert(i < names.length, "Missing name");
@@ -2113,6 +2119,19 @@ Deno.test('sylk', async function(t) {
 				assert.equal(get_cell(X.read(Buffer_from(str), {type:"buffer", codepage:65001}).Sheets.Sheet1, "A1").v, A1);
 				assert.equal(get_cell(X.read(Buffer_from(str.replace(/–/, "\x96"), "binary"), {type:"buffer", codepage:1252}).Sheets.Sheet1, "A1").v, A1);
 			}
+		});
+	});
+	await t.step('date system', async function(t){
+		function make_slk(d1904?: number) { return "ID;PSheetJS\nP;Pd\\/m\\/yy\nP;Pd\\/m\\/yyyy\n" + (d1904 != null ? "O;D;V" + d1904 : "") + "\nF;P0;FG0G;X1;Y1\nC;K1\nE"; }
+		await t.step('should default to 1900', async function(t) {
+			assert.equal(get_cell(X.read(make_slk(), {type: "binary"}).Sheets["Sheet1"], "A1").v, 1);
+			assert.assert(get_cell(X.read(make_slk(), {type: "binary", cellDates: true}).Sheets["Sheet1"], "A1").v.getFullYear() < 1902);
+			assert.equal(get_cell(X.read(make_slk(5), {type: "binary"}).Sheets["Sheet1"], "A1").v, 1);
+			assert.assert(get_cell(X.read(make_slk(5), {type: "binary", cellDates: true}).Sheets["Sheet1"], "A1").v.getFullYear() < 1902);
+		});
+		await t.step('should use 1904 when specified', async function(t) {
+			assert.assert(get_cell(X.read(make_slk(1), {type: "binary", cellDates: true}).Sheets["Sheet1"], "A1").v.getFullYear() > 1902);
+			assert.assert(get_cell(X.read(make_slk(4), {type: "binary", cellDates: true}).Sheets["Sheet1"], "A1").v.getFullYear() > 1902);
 		});
 	});
 });

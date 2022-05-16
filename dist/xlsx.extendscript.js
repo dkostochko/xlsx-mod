@@ -160,7 +160,7 @@ var DO_NOT_EXPORT_CODEPAGE = true;
 /*global exports, module, require:false, process:false, Buffer:false, ArrayBuffer:false, DataView:false, Deno:false */
 var XLSX = {};
 function make_xlsx_lib(XLSX){
-XLSX.version = '0.18.6';
+XLSX.version = '0.18.7';
 var current_codepage = 1200, current_ansi = 1252;
 /*global cptable:true, window */
 var $cptable;
@@ -3686,7 +3686,7 @@ var unescapexml = (function() {
 	};
 })();
 
-var decregex=/[&<>'"]/g, charegex = /[\u0000-\u0008\u000b-\u001f]/g;
+var decregex=/[&<>'"]/g, charegex = /[\u0000-\u0008\u000b-\u001f\uFFFE-\uFFFF]/g;
 function escapexml(text){
 	var s = text + '';
 	return s.replace(decregex, function(y) { return rencoding[y]; }).replace(charegex,function(s) { return "_x" + ("000"+s.charCodeAt(0).toString(16)).slice(-4) + "_";});
@@ -8679,6 +8679,7 @@ var WK_ = (function() {
 		var refguess = {s: {r:0, c:0}, e: {r:0, c:0} };
 		var sheetRows = o.sheetRows || 0;
 
+		if(d[4] == 0x51 && d[5] == 0x50 && d[6] == 0x57) return qpw_to_workbook_buf(d, opts);
 		if(d[2] == 0x00) {
 			if(d[3] == 0x08 || d[3] == 0x09) {
 				if(d.length >= 16 && d[14] == 0x05 && d[15] === 0x6c) throw new Error("Unsupported Works 3 for Mac file");
@@ -9485,6 +9486,144 @@ var WK_ = (function() {
 0x6F44: { n:"??" },
 0xFFFF: { n:"" }
 	};
+
+	/* QPW uses a different set of record types */
+	function qpw_to_workbook_buf(d, opts) {
+		prep_blob(d, 0);
+		var o = opts || {};
+		if(DENSE != null && o.dense == null) o.dense = DENSE;
+		var s = ((o.dense ? [] : {}));
+		var SST = [], sname = "", formulae = [];
+		var range = {s:{r:-1,c:-1}, e:{r:-1,c:-1}};
+		var cnt = 0, type = 0, C = 0, R = 0;
+		var wb = { SheetNames: [], Sheets: {} };
+		outer: while(d.l < d.length) {
+			var RT = d.read_shift(2), length = d.read_shift(2);
+			var p = d.slice(d.l, d.l + length);
+			prep_blob(p, 0);
+			switch(RT) {
+				case 0x01: /* BOF */
+					if(p.read_shift(4) != 0x39575051) throw "Bad QPW9 BOF!";
+					break;
+				case 0x02: /* EOF */ break outer;
+
+				/* TODO: The behavior here should be consistent with Numbers: QP Notebook ~ .TN.SheetArchive, QP Sheet ~ .TST.TSTable */
+				case 0x0401: /* BON */ break;
+				case 0x0402: /* EON */ /* TODO: backfill missing sheets based on BON cnt */ break;
+
+				case 0x0407: { /* SST */
+					p.l += 12;
+					while(p.l < p.length) {
+						cnt = p.read_shift(2);
+						type = p.read_shift(1);
+						SST.push(p.read_shift(cnt, 'cstr'));
+					}
+				} break;
+				case 0x0408: { /* FORMULAE */
+					//p.l += 12;
+					//while(p.l < p.length) {
+					//	cnt = p.read_shift(2);
+					//	formulae.push(p.slice(p.l, p.l + cnt + 1)); p.l += cnt + 1;
+					//}
+				} break;
+
+				case 0x0601: { /* BOS */
+					var sidx = p.read_shift(2);
+					s = ((o.dense ? [] : {}));
+					range.s.c = p.read_shift(2);
+					range.e.c = p.read_shift(2);
+					range.s.r = p.read_shift(4);
+					range.e.r = p.read_shift(4);
+					p.l += 4;
+					if(p.l + 2 < p.length) {
+						cnt = p.read_shift(2);
+						type = p.read_shift(1);
+						sname = cnt == 0 ? "" : p.read_shift(cnt, 'cstr');
+					}
+					if(!sname) sname = XLSX.utils.encode_col(sidx);
+					/* TODO: backfill empty sheets */
+				} break;
+				case 0x0602: { /* EOS */
+					/* NOTE: QP valid range A1:IV1000000 */
+					if(range.s.c > 0xFF || range.s.r > 999999) break;
+					if(range.e.c < range.s.c) range.e.c = range.s.c;
+					if(range.e.r < range.s.r) range.e.r = range.s.r;
+					s["!ref"] = encode_range(range);
+					book_append_sheet(wb, s, sname); // TODO: a barrel roll
+				} break;
+
+				case 0x0A01: { /* COL (like XLS Row, modulo the layout transposition) */
+					C = p.read_shift(2);
+					if(range.e.c < C) range.e.c = C;
+					if(range.s.c > C) range.s.c = C;
+					R = p.read_shift(4);
+					if(range.s.r > R) range.s.r = R;
+					R = p.read_shift(4);
+					if(range.e.r < R) range.e.r = R;
+				} break;
+
+				case 0x0C01: { /* MulCells (like XLS MulRK, but takes advantage of common column data patterns) */
+					R = p.read_shift(4), cnt = p.read_shift(4);
+					if(range.s.r > R) range.s.r = R;
+					if(range.e.r < R + cnt - 1) range.e.r = R + cnt - 1;
+					while(p.l < p.length) {
+						var cell = { t: "z" };
+						var flags = p.read_shift(1);
+						if(flags & 0x80) p.l += 2;
+						var mul = (flags & 0x40) ? p.read_shift(2) - 1: 0;
+						switch(flags & 0x1F) {
+							case 1: break;
+							case 2: cell = { t: "n", v: p.read_shift(2) }; break;
+							case 3: cell = { t: "n", v: p.read_shift(2, 'i') }; break;
+							case 5: cell = { t: "n", v: p.read_shift(8, 'f') }; break;
+							case 7: cell = { t: "s", v: SST[type = p.read_shift(4) - 1] }; break;
+							case 8: cell = { t: "n", v: p.read_shift(8, 'f') }; p.l += 2; /* cell.f = formulae[p.read_shift(4)]; */ p.l += 4; break;
+							default: throw "Unrecognized QPW cell type " + (flags & 0x1F);
+						}
+						var delta = 0;
+						if(flags & 0x20) switch(flags & 0x1F) {
+							case 2: delta = p.read_shift(2); break;
+							case 3: delta = p.read_shift(2, 'i'); break;
+							case 7: delta = p.read_shift(2); break;
+							default: throw "Unsupported delta for QPW cell type " + (flags & 0x1F);
+						}
+						if(!(!o.sheetStubs && cell.t == "z")) {
+							if(Array.isArray(s)) {
+								if(!s[R]) s[R] = [];
+								s[R][C] = cell;
+							} else s[encode_cell({r:R, c:C})] = cell;
+						}
+						++R; --cnt;
+						while(mul-- > 0 && cnt >= 0) {
+							if(flags & 0x20) switch(flags & 0x1F) {
+								case 2: cell = { t: "n", v: (cell.v + delta) & 0xFFFF }; break;
+								case 3: cell = { t: "n", v: (cell.v + delta) & 0xFFFF }; if(cell.v > 0x7FFF) cell.v -= 0x10000; break;
+								case 7: cell = { t: "s", v: SST[type = (type + delta) >>> 0] }; break;
+								default: throw "Cannot apply delta for QPW cell type " + (flags & 0x1F);
+							} else switch(flags & 0x1F) {
+								case 1: cell = { t: "z" }; break;
+								case 2: cell = { t: "n", v: p.read_shift(2) }; break;
+								case 7: cell = { t: "s", v: SST[type = p.read_shift(4) - 1] }; break;
+								default: throw "Cannot apply repeat for QPW cell type " + (flags & 0x1F);
+							}
+							if(!(!o.sheetStubs && cell.t == "z")) {
+								if(Array.isArray(s)) {
+									if(!s[R]) s[R] = [];
+									s[R][C] = cell;
+								} else s[encode_cell({r:R, c:C})] = cell;
+							}
+							++R; --cnt;
+						}
+					}
+				} break;
+
+				default: break;
+			}
+			d.l += length;
+		}
+		return wb;
+	}
+
 	return {
 		sheet_to_wk1: sheet_to_wk1,
 		book_to_wk3: book_to_wk3,
@@ -14671,7 +14810,7 @@ function get_cell_style(styles, cell, opts) {
 	return len;
 }
 
-function safe_format(p, fmtid, fillid, opts, themes, styles, cellFormat) {
+function safe_format(p, fmtid, fillid, opts, themes, styles) {
 	try {
 		if(opts.cellNF) p.z = table_fmt[fmtid];
 	} catch(e) { if(opts.WTF) throw e; }
@@ -14697,14 +14836,6 @@ function safe_format(p, fmtid, fillid, opts, themes, styles, cellFormat) {
 		else p.w = SSF_format(fmtid,p.v,_ssfopts);
 	} catch(e) { if(opts.WTF) throw e; }
 	if(!opts.cellStyles) return;
-	if (cellFormat) {
-		if (cellFormat.applyFont) {
-			p.font = styles.Fonts[cellFormat.fontId];
-		}
-		if (cellFormat.applyAlignment) {
-			p.alignment = cellFormat.alignment;
-		}
-	}
 	if(fillid != null) try {
 		p.s = styles.Fills[fillid];
 		if (p.s.fgColor && p.s.fgColor.theme && !p.s.fgColor.rgb) {
@@ -15201,7 +15332,7 @@ return function parse_ws_xml_data(sdata, s, opts, guess, themes, styles) {
 					}
 				}
 			}
-			safe_format(p, fmtid, fillid, opts, themes, styles, cf);
+			safe_format(p, fmtid, fillid, opts, themes, styles);
 			if(opts.cellDates && do_format && p.t == 'n' && fmt_is_date(table_fmt[fmtid])) { p.t = 'd'; p.v = numdate(p.v); }
 			if(tag.cm && opts.xlmeta) {
 				var cm = (opts.xlmeta.Cell||[])[+tag.cm-1];

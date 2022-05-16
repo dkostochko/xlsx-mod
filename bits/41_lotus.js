@@ -34,6 +34,7 @@ var WK_ = /*#__PURE__*/(function() {
 		var refguess = {s: {r:0, c:0}, e: {r:0, c:0} };
 		var sheetRows = o.sheetRows || 0;
 
+		if(d[4] == 0x51 && d[5] == 0x50 && d[6] == 0x57) return qpw_to_workbook_buf(d, opts);
 		if(d[2] == 0x00) {
 			if(d[3] == 0x08 || d[3] == 0x09) {
 				if(d.length >= 16 && d[14] == 0x05 && d[15] === 0x6c) throw new Error("Unsupported Works 3 for Mac file");
@@ -402,16 +403,88 @@ var WK_ = /*#__PURE__*/(function() {
 	]; */
 	/* TODO: flesh out */
 	var FuncTab = {
+		0x1F: ["NA", 0],
+		// 0x20: ["ERR", 0],
+		0x21: ["ABS", 1],
+		0x22: ["TRUNC", 1],
+		0x23: ["SQRT", 1],
+		0x24: ["LOG", 1],
+		0x25: ["LN", 1],
+		0x26: ["PI", 0],
+		0x27: ["SIN", 1],
+		0x28: ["COS", 1],
+		0x29: ["TAN", 1],
+		0x2A: ["ATAN2", 2],
+		0x2B: ["ATAN", 1],
+		0x2C: ["ASIN", 1],
+		0x2D: ["ACOS", 1],
+		0x2E: ["EXP", 1],
+		0x2F: ["MOD", 2],
+		// 0x30
+		0x31: ["ISNA", 1],
+		0x32: ["ISERR", 1],
 		0x33: ["FALSE", 0],
 		0x34: ["TRUE", 0],
+		0x35: ["RAND", 0],
+		// 0x36 DATE
+		// 0x37 NOW
+		// 0x38 PMT
+		// 0x39 PV
+		// 0x3A FV
+		// 0x3B IF
+		// 0x3C DAY
+		// 0x3D MONTH
+		// 0x3E YEAR
+		0x3F: ["ROUND", 2],
+		// 0x40 TIME
+		// 0x41 HOUR
+		// 0x42 MINUTE
+		// 0x43 SECOND
+		0x44: ["ISNUMBER", 1],
+		0x45: ["ISTEXT", 1],
 		0x46: ["LEN", 1],
+		0x47: ["VALUE", 1],
+		// 0x48: ["FIXED", ?? 1],
+		0x49: ["MID", 3],
 		0x4A: ["CHAR", 1],
+		// 0x4B
+		// 0x4C FIND
+		// 0x4D DATEVALUE
+		// 0x4E TIMEVALUE
+		// 0x4F CELL
 		0x50: ["SUM", 69],
 		0x51: ["AVERAGEA", 69],
 		0x52: ["COUNTA", 69],
 		0x53: ["MINA", 69],
 		0x54: ["MAXA", 69],
+		// 0x55 VLOOKUP
+		// 0x56 NPV
+		// 0x57 VAR
+		// 0x58 STD
+		// 0x59 IRR
+		// 0x5A HLOOKUP
+		// 0x5B DSUM
+		// 0x5C DAVERAGE
+		// 0x5D DCOUNTA
+		// 0x5E DMIN
+		// 0x5F DMAX
+		// 0x60 DVARP
+		// 0x61 DSTDEVP
+		// 0x62 INDEX
+		// 0x63 COLS
+		// 0x64 ROWS
+		// 0x65 REPEAT
+		0x66: ["UPPER", 1],
+		0x67: ["LOWER", 1],
+		// 0x68 LEFT
+		// 0x69 RIGHT
+		// 0x6A REPLACE
+		0x6B: ["PROPER", 1],
+		// 0x6C CELL
+		0x6D: ["TRIM", 1],
+		// 0x6E CLEAN
 		0x6F: ["T", 1]
+		// 0x70 V
 	};
 	var BinOpTab = [
 		  "",   "",   "",   "",   "",   "",   "",   "", // eslint-disable-line no-mixed-spaces-and-tabs
@@ -840,6 +913,144 @@ var WK_ = /*#__PURE__*/(function() {
 		/*::[*/0x6F44/*::]*/: { n:"??" },
 		/*::[*/0xFFFF/*::]*/: { n:"" }
 	};
+
+	/* QPW uses a different set of record types */
+	function qpw_to_workbook_buf(d, opts)/*:Workbook*/ {
+		prep_blob(d, 0);
+		var o = opts || {};
+		if(DENSE != null && o.dense == null) o.dense = DENSE;
+		var s/*:Worksheet*/ = ((o.dense ? [] : {})/*:any*/);
+		var SST = [], sname = "", formulae = [];
+		var range = {s:{r:-1,c:-1}, e:{r:-1,c:-1}};
+		var cnt = 0, type = 0, C = 0, R = 0;
+		var wb = { SheetNames: [], Sheets: {} };
+		outer: while(d.l < d.length) {
+			var RT = d.read_shift(2), length = d.read_shift(2);
+			var p = d.slice(d.l, d.l + length);
+			prep_blob(p, 0);
+			switch(RT) {
+				case 0x01: /* BOF */
+					if(p.read_shift(4) != 0x39575051) throw "Bad QPW9 BOF!";
+					break;
+				case 0x02: /* EOF */ break outer;
+
+				/* TODO: The behavior here should be consistent with Numbers: QP Notebook ~ .TN.SheetArchive, QP Sheet ~ .TST.TableModelArchive */
+				case 0x0401: /* BON */ break;
+				case 0x0402: /* EON */ /* TODO: backfill missing sheets based on BON cnt */ break;
+
+				case 0x0407: { /* SST */
+					p.l += 12;
+					while(p.l < p.length) {
+						cnt = p.read_shift(2);
+						type = p.read_shift(1);
+						SST.push(p.read_shift(cnt, 'cstr'));
+					}
+				} break;
+				case 0x0408: { /* FORMULAE */
+					//p.l += 12;
+					//while(p.l < p.length) {
+					//	cnt = p.read_shift(2);
+					//	formulae.push(p.slice(p.l, p.l + cnt + 1)); p.l += cnt + 1;
+					//}
+				} break;
+
+				case 0x0601: { /* BOS */
+					var sidx = p.read_shift(2);
+					s = ((o.dense ? [] : {})/*:any*/);
+					range.s.c = p.read_shift(2);
+					range.e.c = p.read_shift(2);
+					range.s.r = p.read_shift(4);
+					range.e.r = p.read_shift(4);
+					p.l += 4;
+					if(p.l + 2 < p.length) {
+						cnt = p.read_shift(2);
+						type = p.read_shift(1);
+						sname = cnt == 0 ? "" : p.read_shift(cnt, 'cstr');
+					}
+					if(!sname) sname = encode_col(sidx);
+					/* TODO: backfill empty sheets */
+				} break;
+				case 0x0602: { /* EOS */
+					/* NOTE: QP valid range A1:IV1000000 */
+					if(range.s.c > 0xFF || range.s.r > 999999) break;
+					if(range.e.c < range.s.c) range.e.c = range.s.c;
+					if(range.e.r < range.s.r) range.e.r = range.s.r;
+					s["!ref"] = encode_range(range);
+					book_append_sheet(wb, s, sname); // TODO: a barrel roll
+				} break;
+
+				case 0x0A01: { /* COL (like XLS Row, modulo the layout transposition) */
+					C = p.read_shift(2);
+					if(range.e.c < C) range.e.c = C;
+					if(range.s.c > C) range.s.c = C;
+					R = p.read_shift(4);
+					if(range.s.r > R) range.s.r = R;
+					R = p.read_shift(4);
+					if(range.e.r < R) range.e.r = R;
+				} break;
+
+				case 0x0C01: { /* MulCells (like XLS MulRK, but takes advantage of common column data patterns) */
+					R = p.read_shift(4), cnt = p.read_shift(4);
+					if(range.s.r > R) range.s.r = R;
+					if(range.e.r < R + cnt - 1) range.e.r = R + cnt - 1;
+					while(p.l < p.length) {
+						var cell = { t: "z" };
+						var flags = p.read_shift(1);
+						if(flags & 0x80) p.l += 2;
+						var mul = (flags & 0x40) ? p.read_shift(2) - 1: 0;
+						switch(flags & 0x1F) {
+							case 1: break;
+							case 2: cell = { t: "n", v: p.read_shift(2) }; break;
+							case 3: cell = { t: "n", v: p.read_shift(2, 'i') }; break;
+							case 5: cell = { t: "n", v: p.read_shift(8, 'f') }; break;
+							case 7: cell = { t: "s", v: SST[type = p.read_shift(4) - 1] }; break;
+							case 8: cell = { t: "n", v: p.read_shift(8, 'f') }; p.l += 2; /* cell.f = formulae[p.read_shift(4)]; */ p.l += 4; break;
+							default: throw "Unrecognized QPW cell type " + (flags & 0x1F);
+						}
+						var delta = 0;
+						if(flags & 0x20) switch(flags & 0x1F) {
+							case 2: delta = p.read_shift(2); break;
+							case 3: delta = p.read_shift(2, 'i'); break;
+							case 7: delta = p.read_shift(2); break;
+							default: throw "Unsupported delta for QPW cell type " + (flags & 0x1F);
+						}
+						if(!(!o.sheetStubs && cell.t == "z")) {
+							if(Array.isArray(s)) {
+								if(!s[R]) s[R] = [];
+								s[R][C] = cell;
+							} else s[encode_cell({r:R, c:C})] = cell;
+						}
+						++R; --cnt;
+						while(mul-- > 0 && cnt >= 0) {
+							if(flags & 0x20) switch(flags & 0x1F) {
+								case 2: cell = { t: "n", v: (cell.v + delta) & 0xFFFF }; break;
+								case 3: cell = { t: "n", v: (cell.v + delta) & 0xFFFF }; if(cell.v > 0x7FFF) cell.v -= 0x10000; break;
+								case 7: cell = { t: "s", v: SST[type = (type + delta) >>> 0] }; break;
+								default: throw "Cannot apply delta for QPW cell type " + (flags & 0x1F);
+							} else switch(flags & 0x1F) {
+								case 1: cell = { t: "z" }; break;
+								case 2: cell = { t: "n", v: p.read_shift(2) }; break;
+								case 7: cell = { t: "s", v: SST[type = p.read_shift(4) - 1] }; break;
+								default: throw "Cannot apply repeat for QPW cell type " + (flags & 0x1F);
+							}
+							if(!(!o.sheetStubs && cell.t == "z")) {
+								if(Array.isArray(s)) {
+									if(!s[R]) s[R] = [];
+									s[R][C] = cell;
+								} else s[encode_cell({r:R, c:C})] = cell;
+							}
+							++R; --cnt;
+						}
+					}
+				} break;
+
+				default: break;
+			}
+			d.l += length;
+		}
+		return wb;
+	}
+
 	return {
 		sheet_to_wk1: sheet_to_wk1,
 		book_to_wk3: book_to_wk3,
