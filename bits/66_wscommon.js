@@ -81,6 +81,155 @@ function get_cell_style(styles/*:Array<any>*/, cell/*:Cell*/, opts) {
 	return len;
 }
 
+var indexedColors  = {
+	"0":'00000000',
+	"1":'00FFFFFF',
+	"2":'00FF0000',
+	"3":'0000FF00',
+	"4":'000000FF',
+	"5":'00FFFF00',
+	"6":'00FF00FF',
+	"7":'0000FFFF',
+	"8":'00000000',
+	"9":'00FFFFFF',
+	"10":'00FF0000',
+	"11":'0000FF00',
+	"12":'000000FF',
+	"13":'00FFFF00',
+	"14":'00FF00FF',
+	"15":'0000FFFF',
+	"16":'00800000',
+	"17":'00008000',
+	"18":'00000080',
+	"19":'00808000',
+	"20":'00800080',
+	"21":'00008080',
+	"22":'00C0C0C0',
+	"23":'00808080',
+	"24":'009999FF',
+	"25":'00993366',
+	"26":'00FFFFCC',
+	"27":'00CCFFFF',
+	"28":'00660066',
+	"29":'00FF8080',
+	"30":'000066CC',
+	"31":'00CCCCFF',
+	"32":'00000080',
+	"33":'00FF00FF',
+	"34":'00FFFF00',
+	"35":'0000FFFF',
+	"36":'00800080',
+	"37":'00800000',
+	"38":'00008080',
+	"39":'000000FF',
+	"40":'0000CCFF',
+	"41":'00CCFFFF',
+	"42":'00CCFFCC',
+	"43":'00FFFF99',
+	"44":'0099CCFF',
+	"45":'00FF99CC',
+	"46":'00CC99FF',
+	"47":'00FFCC99',
+	"48":'003366FF',
+	"49":'0033CCCC',
+	"50":'0099CC00',
+	"51":'00FFCC00',
+	"52":'00FF9900',
+	"53":'00FF6600',
+	"54":'00666699',
+	"55":'00969696',
+	"56":'00003366',
+	"57":'00339966',
+	"58":'00003300',
+	"59":'00333300',
+	"60":'00993300',
+	"61":'00993366',
+	"62":'00333399',
+	"63":'00333333',
+	"64":null,//system Foreground n/a
+	"65":null,//system Background n/a
+};
+
+function combineIndexedColor(indexedColorsInner , indexedColors ) {
+	var ret = {};
+	if(indexedColorsInner==null || indexedColorsInner.length===0){
+		return indexedColors;
+	}
+	for(var key in indexedColors){
+		var value = indexedColors[key], kn = parseInt(key);
+		var inner = indexedColorsInner[kn];
+		if(inner==null){
+			ret[key] = value;
+		}
+		else{
+			ret[key] = inner.attributeList.rgb;
+		}
+	}
+
+	return ret;
+}
+
+function LightenDarkenColor(sixColor, tint){
+	var hsl = rgb2HSL(hex2RGB(sixColor));
+	if(tint>0){
+		hsl[2] = hsl[2] * (1.0-tint) + tint;
+	}
+	else if(tint<0){
+		hsl[2] = hsl[2] * (1.0 + tint);
+	}
+	else{
+		return hex;
+	}
+
+	return rgb2Hex(hsl2RGB(hsl));
+}
+
+function getColor(color, styles){
+	var clrScheme = styles["clrScheme"];
+	var indexedColorsInner = styles["indexedColors"];
+	var indexedColorsList = combineIndexedColor(indexedColorsInner, indexedColors);
+	var indexed = color.indexed, rgb = color.rgb, theme = color.theme, tint = color.tint;
+	var bg;
+	if(indexed!=null){
+		var indexedNum = parseInt(indexed);
+		bg = indexedColorsList[indexedNum];
+		if(bg!=null){
+			bg = bg.substring(bg.length-6, bg.length);
+		}
+	}
+	else if(rgb!=null){
+		bg = rgb.substring(rgb.length-6, rgb.length);
+	}
+	else if(theme!=null){
+/*		var themeNum = parseInt(theme);
+		if(themeNum===0){
+			themeNum = 1;
+		}
+		else if(themeNum===1){
+			themeNum = 0;
+		}
+		else if(themeNum===2){
+			themeNum = 3;
+		}
+		else if(themeNum===3){
+			themeNum = 2;
+		}*/
+		var clrSchemeElement = clrScheme[theme];
+		if(clrSchemeElement!=null){
+			bg = clrSchemeElement.rgb;
+		}
+	}
+
+	if(tint!=null){
+		var tintNum = parseFloat(tint);
+		if(bg!=null){
+			bg = LightenDarkenColor(bg, tintNum);
+		}
+	}
+
+	return bg ? bg.toLowerCase() : bg;
+}
+
 function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, opts, themes, styles, cellFormat) {
 	try {
 		if(opts.cellNF) p.z = table_fmt[fmtid];
@@ -116,15 +265,22 @@ function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, opts, the
 		}
 	}
 	if(fillid != null) try {
-		p.s = styles.Fills[fillid];
-		if (p.s.fgColor && p.s.fgColor.theme && !p.s.fgColor.rgb) {
+		p.s =  styles.Fills[fillid];
+		if (p.s.fgColor && !p.s.fgColor.rgb && !!themes.themeElements) {
+			p.s.fgColor.rgb = getColor(p.s.fgColor, themes.themeElements);
+		}
+		if (p.s.bgColor && !p.s.bgColor.rgb && !!themes.themeElements) {
+			p.s.bgColor.rgb = getColor(p.s.bgColor, themes.themeElements);
+		}
+		//console.log("Colors", p.s.fgColor, p.s.bgColor);
+		/*if (p.s.fgColor && p.s.fgColor.theme && !p.s.fgColor.rgb) {
 			p.s.fgColor.rgb = rgb_tint(themes.themeElements.clrScheme[p.s.fgColor.theme].rgb, p.s.fgColor.tint || 0);
 			if(opts.WTF) p.s.fgColor.raw_rgb = themes.themeElements.clrScheme[p.s.fgColor.theme].rgb;
 		}
 		if (p.s.bgColor && p.s.bgColor.theme) {
 			p.s.bgColor.rgb = rgb_tint(themes.themeElements.clrScheme[p.s.bgColor.theme].rgb, p.s.bgColor.tint || 0);
 			if(opts.WTF) p.s.bgColor.raw_rgb = themes.themeElements.clrScheme[p.s.bgColor.theme].rgb;
-		}
+		}*/
 	} catch(e) { if(opts.WTF && styles.Fills) throw e; }
 }
 

@@ -5339,9 +5339,9 @@ var RELS = ({
 	XLMETA: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/sheetMetadata",
 	TCMNT: "http://schemas.microsoft.com/office/2017/10/relationships/threadedComment",
 	PEOPLE: "http://schemas.microsoft.com/office/2017/10/relationships/person",
+	CONN: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/connections",
 	VBA: "http://schemas.microsoft.com/office/2006/relationships/vbaProject"
 }/*:any*/);
-
 
 /* 9.3.3 Representing Relationships */
 function get_rels_path(file/*:string*/)/*:string*/ {
@@ -8997,16 +8997,88 @@ var WK_ = /*#__PURE__*/(function() {
 	]; */
 	/* TODO: flesh out */
 	var FuncTab = {
+		0x1F: ["NA", 0],
+		// 0x20: ["ERR", 0],
+		0x21: ["ABS", 1],
+		0x22: ["TRUNC", 1],
+		0x23: ["SQRT", 1],
+		0x24: ["LOG", 1],
+		0x25: ["LN", 1],
+		0x26: ["PI", 0],
+		0x27: ["SIN", 1],
+		0x28: ["COS", 1],
+		0x29: ["TAN", 1],
+		0x2A: ["ATAN2", 2],
+		0x2B: ["ATAN", 1],
+		0x2C: ["ASIN", 1],
+		0x2D: ["ACOS", 1],
+		0x2E: ["EXP", 1],
+		0x2F: ["MOD", 2],
+		// 0x30
+		0x31: ["ISNA", 1],
+		0x32: ["ISERR", 1],
 		0x33: ["FALSE", 0],
 		0x34: ["TRUE", 0],
+		0x35: ["RAND", 0],
+		// 0x36 DATE
+		// 0x37 NOW
+		// 0x38 PMT
+		// 0x39 PV
+		// 0x3A FV
+		// 0x3B IF
+		// 0x3C DAY
+		// 0x3D MONTH
+		// 0x3E YEAR
+		0x3F: ["ROUND", 2],
+		// 0x40 TIME
+		// 0x41 HOUR
+		// 0x42 MINUTE
+		// 0x43 SECOND
+		0x44: ["ISNUMBER", 1],
+		0x45: ["ISTEXT", 1],
 		0x46: ["LEN", 1],
+		0x47: ["VALUE", 1],
+		// 0x48: ["FIXED", ?? 1],
+		0x49: ["MID", 3],
 		0x4A: ["CHAR", 1],
+		// 0x4B
+		// 0x4C FIND
+		// 0x4D DATEVALUE
+		// 0x4E TIMEVALUE
+		// 0x4F CELL
 		0x50: ["SUM", 69],
 		0x51: ["AVERAGEA", 69],
 		0x52: ["COUNTA", 69],
 		0x53: ["MINA", 69],
 		0x54: ["MAXA", 69],
+		// 0x55 VLOOKUP
+		// 0x56 NPV
+		// 0x57 VAR
+		// 0x58 STD
+		// 0x59 IRR
+		// 0x5A HLOOKUP
+		// 0x5B DSUM
+		// 0x5C DAVERAGE
+		// 0x5D DCOUNTA
+		// 0x5E DMIN
+		// 0x5F DMAX
+		// 0x60 DVARP
+		// 0x61 DSTDEVP
+		// 0x62 INDEX
+		// 0x63 COLS
+		// 0x64 ROWS
+		// 0x65 REPEAT
+		0x66: ["UPPER", 1],
+		0x67: ["LOWER", 1],
+		// 0x68 LEFT
+		// 0x69 RIGHT
+		// 0x6A REPLACE
+		0x6B: ["PROPER", 1],
+		// 0x6C CELL
+		0x6D: ["TRIM", 1],
+		// 0x6E CLEAN
 		0x6F: ["T", 1]
+		// 0x70 V
 	};
 	var BinOpTab = [
 		  "",   "",   "",   "",   "",   "",   "",   "", // eslint-disable-line no-mixed-spaces-and-tabs
@@ -14763,6 +14835,155 @@ function get_cell_style(styles/*:Array<any>*/, cell/*:Cell*/, opts) {
 	return len;
 }
 
+var indexedColors  = {
+	"0":'00000000',
+	"1":'00FFFFFF',
+	"2":'00FF0000',
+	"3":'0000FF00',
+	"4":'000000FF',
+	"5":'00FFFF00',
+	"6":'00FF00FF',
+	"7":'0000FFFF',
+	"8":'00000000',
+	"9":'00FFFFFF',
+	"10":'00FF0000',
+	"11":'0000FF00',
+	"12":'000000FF',
+	"13":'00FFFF00',
+	"14":'00FF00FF',
+	"15":'0000FFFF',
+	"16":'00800000',
+	"17":'00008000',
+	"18":'00000080',
+	"19":'00808000',
+	"20":'00800080',
+	"21":'00008080',
+	"22":'00C0C0C0',
+	"23":'00808080',
+	"24":'009999FF',
+	"25":'00993366',
+	"26":'00FFFFCC',
+	"27":'00CCFFFF',
+	"28":'00660066',
+	"29":'00FF8080',
+	"30":'000066CC',
+	"31":'00CCCCFF',
+	"32":'00000080',
+	"33":'00FF00FF',
+	"34":'00FFFF00',
+	"35":'0000FFFF',
+	"36":'00800080',
+	"37":'00800000',
+	"38":'00008080',
+	"39":'000000FF',
+	"40":'0000CCFF',
+	"41":'00CCFFFF',
+	"42":'00CCFFCC',
+	"43":'00FFFF99',
+	"44":'0099CCFF',
+	"45":'00FF99CC',
+	"46":'00CC99FF',
+	"47":'00FFCC99',
+	"48":'003366FF',
+	"49":'0033CCCC',
+	"50":'0099CC00',
+	"51":'00FFCC00',
+	"52":'00FF9900',
+	"53":'00FF6600',
+	"54":'00666699',
+	"55":'00969696',
+	"56":'00003366',
+	"57":'00339966',
+	"58":'00003300',
+	"59":'00333300',
+	"60":'00993300',
+	"61":'00993366',
+	"62":'00333399',
+	"63":'00333333',
+	"64":null,//system Foreground n/a
+	"65":null,//system Background n/a
+};
+
+function combineIndexedColor(indexedColorsInner , indexedColors ) {
+	var ret = {};
+	if(indexedColorsInner==null || indexedColorsInner.length===0){
+		return indexedColors;
+	}
+	for(var key in indexedColors){
+		var value = indexedColors[key], kn = parseInt(key);
+		var inner = indexedColorsInner[kn];
+		if(inner==null){
+			ret[key] = value;
+		}
+		else{
+			ret[key] = inner.attributeList.rgb;
+		}
+	}
+
+	return ret;
+}
+
+function LightenDarkenColor(sixColor, tint){
+	var hsl = rgb2HSL(hex2RGB(sixColor));
+	if(tint>0){
+		hsl[2] = hsl[2] * (1.0-tint) + tint;
+	}
+	else if(tint<0){
+		hsl[2] = hsl[2] * (1.0 + tint);
+	}
+	else{
+		return hex;
+	}
+
+	return rgb2Hex(hsl2RGB(hsl));
+}
+
+function getColor(color, styles){
+	var clrScheme = styles["clrScheme"];
+	var indexedColorsInner = styles["indexedColors"];
+	var indexedColorsList = combineIndexedColor(indexedColorsInner, indexedColors);
+	var indexed = color.indexed, rgb = color.rgb, theme = color.theme, tint = color.tint;
+	var bg;
+	if(indexed!=null){
+		var indexedNum = parseInt(indexed);
+		bg = indexedColorsList[indexedNum];
+		if(bg!=null){
+			bg = bg.substring(bg.length-6, bg.length);
+		}
+	}
+	else if(rgb!=null){
+		bg = rgb.substring(rgb.length-6, rgb.length);
+	}
+	else if(theme!=null){
+/*		var themeNum = parseInt(theme);
+		if(themeNum===0){
+			themeNum = 1;
+		}
+		else if(themeNum===1){
+			themeNum = 0;
+		}
+		else if(themeNum===2){
+			themeNum = 3;
+		}
+		else if(themeNum===3){
+			themeNum = 2;
+		}*/
+		var clrSchemeElement = clrScheme[theme];
+		if(clrSchemeElement!=null){
+			bg = clrSchemeElement.rgb;
+		}
+	}
+
+	if(tint!=null){
+		var tintNum = parseFloat(tint);
+		if(bg!=null){
+			bg = LightenDarkenColor(bg, tintNum);
+		}
+	}
+
+	return bg ? bg.toLowerCase() : bg;
+}
+
 function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, opts, themes, styles, cellFormat) {
 	try {
 		if(opts.cellNF) p.z = table_fmt[fmtid];
@@ -14798,15 +15019,22 @@ function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, opts, the
 		}
 	}
 	if(fillid != null) try {
-		p.s = styles.Fills[fillid];
-		if (p.s.fgColor && p.s.fgColor.theme && !p.s.fgColor.rgb) {
+		p.s =  styles.Fills[fillid];
+		if (p.s.fgColor && !p.s.fgColor.rgb && !!themes.themeElements) {
+			p.s.fgColor.rgb = getColor(p.s.fgColor, themes.themeElements);
+		}
+		if (p.s.bgColor && !p.s.bgColor.rgb && !!themes.themeElements) {
+			p.s.bgColor.rgb = getColor(p.s.bgColor, themes.themeElements);
+		}
+		//console.log("Colors", p.s.fgColor, p.s.bgColor);
+		/*if (p.s.fgColor && p.s.fgColor.theme && !p.s.fgColor.rgb) {
 			p.s.fgColor.rgb = rgb_tint(themes.themeElements.clrScheme[p.s.fgColor.theme].rgb, p.s.fgColor.tint || 0);
 			if(opts.WTF) p.s.fgColor.raw_rgb = themes.themeElements.clrScheme[p.s.fgColor.theme].rgb;
 		}
 		if (p.s.bgColor && p.s.bgColor.theme) {
 			p.s.bgColor.rgb = rgb_tint(themes.themeElements.clrScheme[p.s.bgColor.theme].rgb, p.s.bgColor.tint || 0);
 			if(opts.WTF) p.s.bgColor.raw_rgb = themes.themeElements.clrScheme[p.s.bgColor.theme].rgb;
-		}
+		}*/
 	} catch(e) { if(opts.WTF && styles.Fills) throw e; }
 }
 
@@ -24688,6 +24916,12 @@ function sheet_set_array_formula(ws/*:Worksheet*/, range, formula/*:string*/, dy
 			if(dynamic) cell.D = true;
 		}
 	}
+	var wsr = decode_range(ws["!ref"]);
+	if(wsr.s.r > rng.s.r) wsr.s.r = rng.s.r;
+	if(wsr.s.c > rng.s.c) wsr.s.c = rng.s.c;
+	if(wsr.e.r < rng.e.r) wsr.e.r = rng.e.r;
+	if(wsr.e.c < rng.e.c) wsr.e.c = rng.e.c;
+	ws["!ref"] = encode_range(ws["!ref"]);
 	return ws;
 }
 

@@ -34,6 +34,7 @@
 	},
 	"sideEffects": false,
 	"dependencies": {
+		"exceljs": "^4.3.0"
 	},
 	"devDependencies": {
 		"@sheetjs/uglify-js": "~2.7.3",
