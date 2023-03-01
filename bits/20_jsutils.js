@@ -103,7 +103,8 @@ function parseDate(str/*:string|Date*/, fixdate/*:?number*/)/*:Date*/ {
 
 function cc2str(arr/*:Array<number>*/, debomit)/*:string*/ {
 	if(has_buf && Buffer.isBuffer(arr)) {
-		if(debomit) {
+		if(debomit && buf_utf16le) {
+			// TODO: temporary patch
 			if(arr[0] == 0xFF && arr[1] == 0xFE) return utf8write(arr.slice(2).toString("utf16le"));
 			if(arr[1] == 0xFE && arr[2] == 0xFF) return utf8write(utf16beread(arr.slice(2).toString("binary")));
 		}
@@ -156,19 +157,35 @@ function fuzzynum(s/*:string*/)/*:number*/ {
 	if(!isNaN(v = Number(ss))) return v / wt;
 	return v;
 }
+
+/* NOTE: Chrome rejects bare times like 1:23 PM */
+var FDRE1 = /^(0?\d|1[0-2])(?:|:([0-5]?\d)(?:|(\.\d+)(?:|:([0-5]?\d))|:([0-5]?\d)(|\.\d+)))\s+([ap])m?$/;
+
+function fuzzytime1(M) /*:Date*/ {
+    /* TODO: 1904 adjustment, keep in sync with base date */
+    if(!M[2]) return new Date(1899,11,30,(+M[1]%12) + (M[7] == "p" ? 12 : 0), 0, 0, 0);
+    if(M[3]) {
+        if(M[4]) return new Date(1899,11,30,(+M[1]%12) + (M[7] == "p" ? 12 : 0), +M[2], +M[4], parseFloat(M[3])*1000);
+        else return new Date(1899,11,30,(M[7] == "p" ? 12 : 0), +M[1], +M[2], parseFloat(M[3])*1000);
+    }
+    else if(M[5]) return new Date(1899,11,30, (+M[1]%12) + (M[7] == "p" ? 12 : 0), +M[2], +M[5], M[6] ? parseFloat(M[6]) * 1000 : 0);
+    else return new Date(1899,11,30,(+M[1]%12) + (M[7] == "p" ? 12 : 0), +M[2], 0, 0);
+}
 var lower_months = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
 function fuzzydate(s/*:string*/)/*:Date*/ {
+	var lower = s.toLowerCase();
+	var lnos = lower.replace(/\s+/g, " ").trim();
+	var M = lnos.match(FDRE1);
+	if(M) return fuzzytime1(M);
+
 	var o = new Date(s), n = new Date(NaN);
 	var y = o.getYear(), m = o.getMonth(), d = o.getDate();
 	if(isNaN(d)) return n;
-	var lower = s.toLowerCase();
 	if(lower.match(/jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec/)) {
 		lower = lower.replace(/[^a-z]/g,"").replace(/([^a-z]|^)[ap]m?([^a-z]|$)/,"");
 		if(lower.length > 3 && lower_months.indexOf(lower) == -1) return n;
-	} else if(lower.match(/[a-z]/)) return n;
-	if(y < 0 || y > 8099) return n;
-	if((m > 0 || d > 1) && y != 101) return o;
-	if(s.match(/[^-0-9:,\/\\]/)) return n;
+	} else if(lower.replace(/[ap]m?/, "").match(/[a-z]/)) return n;
+	if(y < 0 || y > 8099 || s.match(/[^-0-9:,\/\\]/)) return n;
 	return o;
 }
 

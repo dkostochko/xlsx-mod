@@ -8,6 +8,7 @@ index.html
 misc/
 node_modules
 *.tgz
+*.jsx
 _book
 book.json
 tmp
@@ -59,6 +60,9 @@ shim.js
 test.js
 test.mjs
 test.ts
+test.mts
+testnocp.ts
+testbun.mjs
 .jscs.json
 .gitmodules
 .travis.yml

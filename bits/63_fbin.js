@@ -124,3 +124,209 @@ var parse_XLSBCellParsedFormula = parse_XLSBParsedFormula;
 var parse_XLSBNameParsedFormula = parse_XLSBParsedFormula;
 /* [MS-XLSB] 2.5.97.98 SharedParsedFormula */
 var parse_XLSBSharedParsedFormula = parse_XLSBParsedFormula;
+
+/* Writes a PtgNum or PtgInt */
+function write_XLSBFormulaNum(val/*:number*/) {
+	if((val | 0) == val && val < Math.pow(2,16) && val >= 0) {
+		var oint = new_buf(11);
+		oint.write_shift(4, 3);
+		oint.write_shift(1, 0x1e);
+		oint.write_shift(2, val);
+		oint.write_shift(4, 0);
+		return oint;
+	}
+
+	var num = new_buf(17);
+	num.write_shift(4, 11);
+	num.write_shift(1, 0x1f);
+	num.write_shift(8, val);
+	num.write_shift(4, 0);
+	return num;
+}
+/* Writes a PtgErr */
+function write_XLSBFormulaErr(val/*:number*/) {
+	var oint = new_buf(10);
+	oint.write_shift(4, 2);
+	oint.write_shift(1, 0x1C);
+	oint.write_shift(1, val);
+	oint.write_shift(4, 0);
+	return oint;
+}
+/* Writes a PtgBool */
+function write_XLSBFormulaBool(val/*:boolean*/) {
+	var oint = new_buf(10);
+	oint.write_shift(4, 2);
+	oint.write_shift(1, 0x1D);
+	oint.write_shift(1, val?1:0);
+	oint.write_shift(4, 0);
+	return oint;
+}
+
+/* Writes a PtgStr */
+function write_XLSBFormulaStr(val/*:string*/) {
+	var preamble = new_buf(7);
+	preamble.write_shift(4, 3 + 2 * val.length);
+	preamble.write_shift(1, 0x17);
+	preamble.write_shift(2, val.length);
+
+	var body = new_buf(2 * val.length);
+	body.write_shift(2 * val.length, val, "utf16le");
+
+	var postamble = new_buf(4);
+	postamble.write_shift(4, 0);
+
+	return bconcat([preamble, body, postamble]);
+}
+
+/* Writes a PtgRef */
+function write_XLSBFormulaRef(str) {
+	var cell = decode_cell(str);
+	var out = new_buf(15);
+	out.write_shift(4, 7);
+	out.write_shift(1, 0x04 | ((1)<<5));
+	out.write_shift(4, cell.r);
+	out.write_shift(2, cell.c | ((str.charAt(0) == "$" ? 0 : 1)<<14) | ((str.match(/\$\d/) ? 0 : 1)<<15)); // <== ColRelShort
+	out.write_shift(4, 0);
+
+	return out;
+}
+
+/* Writes a PtgRef3d */
+function write_XLSBFormulaRef3D(str, wb) {
+	var lastbang = str.lastIndexOf("!");
+	var sname = str.slice(0, lastbang);
+	str = str.slice(lastbang+1);
+	var cell = decode_cell(str);
+	if(sname.charAt(0) == "'") sname = sname.slice(1, -1).replace(/''/g, "'");
+
+	var out = new_buf(17);
+	out.write_shift(4, 9);
+	out.write_shift(1, 0x1A | ((1)<<5));
+	out.write_shift(2, 2 + wb.SheetNames.map(function(n) { return n.toLowerCase(); }).indexOf(sname.toLowerCase()));
+	out.write_shift(4, cell.r);
+	out.write_shift(2, cell.c | ((str.charAt(0) == "$" ? 0 : 1)<<14) | ((str.match(/\$\d/) ? 0 : 1)<<15)); // <== ColRelShort
+	out.write_shift(4, 0);
+
+	return out;
+}
+
+/* Writes a PtgRefErr3d */
+function write_XLSBFormulaRefErr3D(str, wb) {
+	var lastbang = str.lastIndexOf("!");
+	var sname = str.slice(0, lastbang);
+	str = str.slice(lastbang+1);
+	if(sname.charAt(0) == "'") sname = sname.slice(1, -1).replace(/''/g, "'");
+
+	var out = new_buf(17);
+	out.write_shift(4, 9);
+	out.write_shift(1, 0x1C | ((1)<<5));
+	out.write_shift(2, 2 + wb.SheetNames.map(function(n) { return n.toLowerCase(); }).indexOf(sname.toLowerCase()));
+	out.write_shift(4, 0);
+	out.write_shift(2, 0); // <== ColRelShort
+	out.write_shift(4, 0);
+
+	return out;
+}
+
+/* Writes a single sheet range [PtgRef PtgRef PtgRange] */
+function write_XLSBFormulaRange(_str) {
+	var parts = _str.split(":"), str = parts[0];
+
+	var out = new_buf(23);
+	out.write_shift(4, 15);
+
+	/* start cell */
+	str = parts[0]; var cell = decode_cell(str);
+	out.write_shift(1, 0x04 | ((1)<<5));
+	out.write_shift(4, cell.r);
+	out.write_shift(2, cell.c | ((str.charAt(0) == "$" ? 0 : 1)<<14) | ((str.match(/\$\d/) ? 0 : 1)<<15)); // <== ColRelShort
+	out.write_shift(4, 0);
+
+	/* end cell */
+	str = parts[1]; cell = decode_cell(str);
+	out.write_shift(1, 0x04 | ((1)<<5));
+	out.write_shift(4, cell.r);
+	out.write_shift(2, cell.c | ((str.charAt(0) == "$" ? 0 : 1)<<14) | ((str.match(/\$\d/) ? 0 : 1)<<15)); // <== ColRelShort
+	out.write_shift(4, 0);
+
+	/* PtgRange */
+	out.write_shift(1, 0x11);
+
+	out.write_shift(4, 0);
+
+	return out;
+}
+
+/* Writes a range with explicit sheet name [PtgRef3D PtgRef3D PtgRange] */
+function write_XLSBFormulaRangeWS(_str, wb) {
+	var lastbang = _str.lastIndexOf("!");
+	var sname = _str.slice(0, lastbang);
+	_str = _str.slice(lastbang+1);
+	if(sname.charAt(0) == "'") sname = sname.slice(1, -1).replace(/''/g, "'");
+	var parts = _str.split(":"); str = parts[0];
+
+	var out = new_buf(27);
+	out.write_shift(4, 19);
+
+	/* start cell */
+	var str = parts[0], cell = decode_cell(str);
+	out.write_shift(1, 0x1A | ((1)<<5));
+	out.write_shift(2, 2 + wb.SheetNames.map(function(n) { return n.toLowerCase(); }).indexOf(sname.toLowerCase()));
+	out.write_shift(4, cell.r);
+	out.write_shift(2, cell.c | ((str.charAt(0) == "$" ? 0 : 1)<<14) | ((str.match(/\$\d/) ? 0 : 1)<<15)); // <== ColRelShort
+
+	/* end cell */
+	str = parts[1]; cell = decode_cell(str);
+	out.write_shift(1, 0x1A | ((1)<<5));
+	out.write_shift(2, 2 + wb.SheetNames.map(function(n) { return n.toLowerCase(); }).indexOf(sname.toLowerCase()));
+	out.write_shift(4, cell.r);
+	out.write_shift(2, cell.c | ((str.charAt(0) == "$" ? 0 : 1)<<14) | ((str.match(/\$\d/) ? 0 : 1)<<15)); // <== ColRelShort
+
+	/* PtgRange */
+	out.write_shift(1, 0x11);
+
+	out.write_shift(4, 0);
+
+	return out;
+}
+
+/* Writes a range with explicit sheet name [PtgArea3d] */
+function write_XLSBFormulaArea3D(_str, wb) {
+	var lastbang = _str.lastIndexOf("!");
+	var sname = _str.slice(0, lastbang);
+	_str = _str.slice(lastbang+1);
+	if(sname.charAt(0) == "'") sname = sname.slice(1, -1).replace(/''/g, "'");
+	var range = decode_range(_str);
+
+	var out = new_buf(23);
+	out.write_shift(4, 15);
+
+	out.write_shift(1, 0x1B | ((1)<<5));
+	out.write_shift(2, 2 + wb.SheetNames.map(function(n) { return n.toLowerCase(); }).indexOf(sname.toLowerCase()));
+	out.write_shift(4, range.s.r);
+	out.write_shift(4, range.e.r);
+	out.write_shift(2, range.s.c);
+	out.write_shift(2, range.e.c);
+
+	out.write_shift(4, 0);
+
+	return out;
+}
+
+
+/* General Formula */
+function write_XLSBFormula(val/*:string|number*/, wb) {
+	if(typeof val == "number") return write_XLSBFormulaNum(val);
+	if(typeof val == "boolean") return write_XLSBFormulaBool(val);
+	if(/^#(DIV\/0!|GETTING_DATA|N\/A|NAME\?|NULL!|NUM!|REF!|VALUE!)$/.test(val)) return write_XLSBFormulaErr(+RBErr[val]);
+	if(val.match(/^\$?(?:[A-W][A-Z]{2}|X[A-E][A-Z]|XF[A-D]|[A-Z]{1,2})\$?(?:10[0-3]\d{4}|104[0-7]\d{3}|1048[0-4]\d{2}|10485[0-6]\d|104857[0-6]|[1-9]\d{0,5})$/)) return write_XLSBFormulaRef(val);
+	if(val.match(/^\$?(?:[A-W][A-Z]{2}|X[A-E][A-Z]|XF[A-D]|[A-Z]{1,2})\$?(?:10[0-3]\d{4}|104[0-7]\d{3}|1048[0-4]\d{2}|10485[0-6]\d|104857[0-6]|[1-9]\d{0,5}):\$?(?:[A-W][A-Z]{2}|X[A-E][A-Z]|XF[A-D]|[A-Z]{1,2})\$?(?:10[0-3]\d{4}|104[0-7]\d{3}|1048[0-4]\d{2}|10485[0-6]\d|104857[0-6]|[1-9]\d{0,5})$/)) return write_XLSBFormulaRange(val);
+	if(val.match(/^#REF!\$?(?:[A-W][A-Z]{2}|X[A-E][A-Z]|XF[A-D]|[A-Z]{1,2})\$?(?:10[0-3]\d{4}|104[0-7]\d{3}|1048[0-4]\d{2}|10485[0-6]\d|104857[0-6]|[1-9]\d{0,5}):\$?(?:[A-W][A-Z]{2}|X[A-E][A-Z]|XF[A-D]|[A-Z]{1,2})\$?(?:10[0-3]\d{4}|104[0-7]\d{3}|1048[0-4]\d{2}|10485[0-6]\d|104857[0-6]|[1-9]\d{0,5})$/)) return write_XLSBFormulaArea3D(val, wb);
+	if(val.match(/^(?:'[^\\\/?*\[\]:]*'|[^'][^\\\/?*\[\]:'`~!@#$%^()\-=+{}|;,<.>]*)!\$?(?:[A-W][A-Z]{2}|X[A-E][A-Z]|XF[A-D]|[A-Z]{1,2})\$?(?:10[0-3]\d{4}|104[0-7]\d{3}|1048[0-4]\d{2}|10485[0-6]\d|104857[0-6]|[1-9]\d{0,5})$/)) return write_XLSBFormulaRef3D(val, wb);
+	if(val.match(/^(?:'[^\\\/?*\[\]:]*'|[^'][^\\\/?*\[\]:'`~!@#$%^()\-=+{}|;,<.>]*)!\$?(?:[A-W][A-Z]{2}|X[A-E][A-Z]|XF[A-D]|[A-Z]{1,2})\$?(?:10[0-3]\d{4}|104[0-7]\d{3}|1048[0-4]\d{2}|10485[0-6]\d|104857[0-6]|[1-9]\d{0,5}):\$?(?:[A-W][A-Z]{2}|X[A-E][A-Z]|XF[A-D]|[A-Z]{1,2})\$?(?:10[0-3]\d{4}|104[0-7]\d{3}|1048[0-4]\d{2}|10485[0-6]\d|104857[0-6]|[1-9]\d{0,5})$/)) return write_XLSBFormulaRangeWS(val, wb);
+	if(/^(?:'[^\\\/?*\[\]:]*'|[^'][^\\\/?*\[\]:'`~!@#$%^()\-=+{}|;,<.>]*)!#REF!$/.test(val)) return write_XLSBFormulaRefErr3D(val, wb);
+	if(/^".*"$/.test(val)) return write_XLSBFormulaStr(val);
+	if(/^[+-]\d+$/.test(val)) return write_XLSBFormulaNum(parseInt(val, 10));
+	throw "Formula |" + val + "| not supported for XLSB";
+}
+var write_XLSBNameParsedFormula = write_XLSBFormula;

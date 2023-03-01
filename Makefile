@@ -9,7 +9,7 @@ HTMLLINT=index.html
 
 MINITGT=xlsx.mini.js
 MINIFLOW=xlsx.mini.flow.js
-MINIDEPS=$(shell cat mini.lst)
+MINIDEPS=$(shell cat misc/mini.lst)
 
 ESMJSTGT=xlsx.mjs
 ESMJSDEPS=$(shell cat misc/mjs.lst)
@@ -59,7 +59,7 @@ $(MTSBITS): misc/%: modules/%
 
 .PHONY: clean
 clean: ## Remove targets and build artifacts
-	rm -f $(TARGET) $(FLOWTARGET)
+	rm -f $(TARGET) $(FLOWTARGET) $(ESMJSTGT) $(MINITGT) $(MINIFLOW)
 
 .PHONY: clean-data
 clean-data:
@@ -70,7 +70,6 @@ init: ## Initial setup for development
 	git submodule init
 	git submodule update
 	#git submodule foreach git pull origin master
-	#git submodule foreach make
 	git submodule foreach make all
 	mkdir -p tmp
 
@@ -115,6 +114,10 @@ bytes: ## Display minified and gzipped file sizes
 	@for i in $(BYTEFILER); do npx printj "%-30s %7d" $$i $$(wc -c < $$i); done
 
 
+.PHONY: git
+git: ## show version string
+	@echo "$$(node -pe 'require("./package.json").version')"
+
 .PHONY: nexe
 nexe: xlsx.exe ## Build nexe standalone executable
 
@@ -133,16 +136,28 @@ pkg: bin/xlsx.njs xlsx.js ## Build pkg standalone executable
 test mocha: test.js ## Run test suite
 	mocha -R spec -t 30000
 
+#*                      To run tests for one format, make test_<fmt>
+#*                      To run the core test suite, make test_misc
+
 .PHONY: test-esm
 test-esm: test.mjs ## Run Node ESM test suite
-	npx mocha -r esm -R spec -t 30000 $<
+	npx -y mocha@9 -R spec -t 30000 $<
+
+test.ts: test.mts
+	node -pe 'var data = fs.readFileSync("'$<'", "utf8"); data.split("\n").map(function(l) { return l.replace(/^describe\((.*?)function\(\)/, "Deno.test($$1async function(t)").replace(/\b(?:it|describe)\((.*?)function\(\)/g, "await t.step($$1async function(t)").replace("assert.ok", "assert.assert"); }).join("\n")' > $@
+
+.PHONY: test-bun
+test-bun: testbun.mjs ## Run Bun test suite
+	bun $<
 
 .PHONY: test-deno
 test-deno: test.ts ## Run Deno test suite
-	deno test --allow-env --allow-read --allow-write $<
+	deno test --allow-env --allow-read --allow-write --config misc/test.deno.jsonc $<
 
-#*                      To run tests for one format, make test_<fmt>
-#*                      To run the core test suite, make test_misc
+.PHONY: test-denocp
+test-denocp: testnocp.ts ## Run Deno test suite (without codepage)
+	deno test --allow-env --allow-read --allow-write --config misc/test.deno.jsonc $<
+
 TESTFMT=$(patsubst %,test_%,$(FMT))
 .PHONY: $(TESTFMT)
 $(TESTFMT): test_%:
@@ -154,9 +169,19 @@ $(TESTESMFMT): test-esm_%:
 	FMTS=$* make test-esm
 
 TESTDENOFMT=$(patsubst %,test-deno_%,$(FMT))
-.PHONY: $(TESTESMFMT)
+.PHONY: $(TESTDENOFMT)
 $(TESTDENOFMT): test-deno_%:
 	FMTS=$* make test-deno
+
+TESTDENOCPFMT=$(patsubst %,test-denocp_%,$(FMT))
+.PHONY: $(TESTDENOCPFMT)
+$(TESTDENOCPFMT): test-denocp_%:
+	FMTS=$* make test-denocp
+
+TESTBUNFMT=$(patsubst %,test-bun_%,$(FMT))
+.PHONY: $(TESTBUNFMT)
+$(TESTBUNFMT): test-bun_%:
+	FMTS=$* make test-bun
 
 .PHONY: travis
 travis: ## Run test suite with minimal output
@@ -168,7 +193,7 @@ ctest: ## Build browser test fixtures
 
 .PHONY: ctestserv
 ctestserv: ## Start a test server on port 8000
-	@cd tests && python -mSimpleHTTPServer
+	@cd tests && python -mSimpleHTTPServer || python3 -mhttp.server || npx -y http-server -p 8000 .
 
 ## Code Checking
 

@@ -4,6 +4,38 @@ This log is intended to keep track of backwards-incompatible changes, including
 but not limited to API changes and file location changes.  Minor behavioral
 changes may not be included if they are not expected to break existing code.
 
+## v0.18.12
+
+* `package.json` added types in `exports` structure
+* uncapped NUMBERS single-sheet single-table export
+* DBF export records using supported codepages
+
+## v0.18.11
+
+* Base64 input ignore data URI wrapper
+* Parse ZIP files that use ZIP64 extended information field
+* More precise handling of time-only values
+* Threaded Comment fallback text for older Excel
+
+## v0.18.10
+
+* `exports` field in package.json to satiate ViteJS and newer tooling
+* JSC (Safari / Bun) perf, see <https://bugs.webkit.org/show_bug.cgi?id=243148>
+* workbook `bookType` property to denote the origin format when parsed from file
+* XLSX force export of stub cells with number formats when `sheetStubs` is set
+
+## v0.18.9
+
+* XLSX / ODS write defined names
+* sync defined names to AutoFilter setting on export
+* 1904 date system setting properly roundtripped
+* ODS read/write number formats
+
+## v0.18.8
+
+* Plaintext parsing of dateless meridien time values (`1:23:45 PM`)
+* Legacy format (SYLK / WK# / Multiplan) minutiae 
+
 ## v0.18.7
 
 * Normalized handling of `\r` and `\n` newline characters

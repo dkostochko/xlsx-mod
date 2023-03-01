@@ -191,8 +191,10 @@ function sheet_to_formulae(sheet/*:Worksheet*/)/*:Array<string>*/ {
 
 function sheet_add_json(_ws/*:?Worksheet*/, js/*:Array<any>*/, opts)/*:Worksheet*/ {
 	var o = opts || {};
+	var dense = _ws ? Array.isArray(_ws) : o.dense;
+	if(DENSE != null && dense == null) dense = DENSE;
 	var offset = +!o.skipHeader;
-	var ws/*:Worksheet*/ = _ws || ({}/*:any*/);
+	var ws/*:Worksheet*/ = _ws || (dense ? ([]/*:any*/) : ({}/*:any*/));
 	var _R = 0, _C = 0;
 	if(ws && o.origin != null) {
 		if(typeof o.origin == 'number') _R = o.origin;
@@ -201,7 +203,6 @@ function sheet_add_json(_ws/*:?Worksheet*/, js/*:Array<any>*/, opts)/*:Worksheet
 			_R = _origin.r; _C = _origin.c;
 		}
 	}
-	var cell/*:Cell*/;
 	var range/*:Range*/ = ({s: {c:0, r:0}, e: {c:_C, r:_R + js.length - 1 + offset}}/*:any*/);
 	if(ws['!ref']) {
 		var _range = safe_decode_range(ws['!ref']);
@@ -212,15 +213,17 @@ function sheet_add_json(_ws/*:?Worksheet*/, js/*:Array<any>*/, opts)/*:Worksheet
 		if(_R == -1) { _R = 0; range.e.r = js.length - 1 + offset; }
 	}
 	var hdr/*:Array<string>*/ = o.header || [], C = 0;
-
+	var ROW = [];
 	js.forEach(function (JS, R/*:number*/) {
+		if(dense && !ws[_R + R + offset]) ws[_R + R + offset] = [];
+		if(dense) ROW = ws[_R + R + offset];
 		keys(JS).forEach(function(k) {
 			if((C=hdr.indexOf(k)) == -1) hdr[C=hdr.length] = k;
 			var v = JS[k];
 			var t = 'z';
 			var z = "";
-			var ref = encode_cell({c:_C + C,r:_R + R + offset});
-			cell = ws_get_cell_stub(ws, ref);
+			var ref = dense ? "" : encode_cell({c:_C + C,r:_R + R + offset});
+			var cell/*:Cell*/ = dense ? ROW[_C + C] : ws[ref];
 			if(v && typeof v === 'object' && !(v instanceof Date)){
 				ws[ref] = v;
 			} else {
@@ -230,11 +233,13 @@ function sheet_add_json(_ws/*:?Worksheet*/, js/*:Array<any>*/, opts)/*:Worksheet
 				else if(v instanceof Date) {
 					t = 'd';
 					if(!o.cellDates) { t = 'n'; v = datenum(v); }
-					z = (o.dateNF || table_fmt[14]);
+					z = (cell != null && cell.z && fmt_is_date(cell.z)) ? cell.z : (o.dateNF || table_fmt[14]);
 				}
 				else if(v === null && o.nullError) { t = 'e'; v = 0; }
-				if(!cell) ws[ref] = cell = ({t:t, v:v}/*:any*/);
-				else {
+				if(!cell) {
+					if(!dense) ws[ref] = cell = ({t:t, v:v}/*:any*/);
+					else ROW[_C + C] = cell = ({t:t, v:v}/*:any*/);
+				} else {
 					cell.t = t; cell.v = v;
 					delete cell.w; delete cell.R;
 					if(z) cell.z = z;
@@ -245,7 +250,11 @@ function sheet_add_json(_ws/*:?Worksheet*/, js/*:Array<any>*/, opts)/*:Worksheet
 	});
 	range.e.c = Math.max(range.e.c, _C + hdr.length - 1);
 	var __R = encode_row(_R);
-	if(offset) for(C = 0; C < hdr.length; ++C) ws[encode_col(C + _C) + __R] = {t:'s', v:hdr[C]};
+	if(dense && !ws[_R]) ws[_R] = [];
+	if(offset) for(C = 0; C < hdr.length; ++C) {
+		if(dense) ws[_R][C + _C] = {t:'s', v:hdr[C]};
+		else ws[encode_col(C + _C) + __R] = {t:'s', v:hdr[C]};
+	}
 	ws['!ref'] = encode_range(range);
 	return ws;
 }
@@ -365,7 +374,7 @@ function sheet_set_array_formula(ws/*:Worksheet*/, range, formula/*:string*/, dy
 	if(wsr.s.c > rng.s.c) wsr.s.c = rng.s.c;
 	if(wsr.e.r < rng.e.r) wsr.e.r = rng.e.r;
 	if(wsr.e.c < rng.e.c) wsr.e.c = rng.e.c;
-	ws["!ref"] = encode_range(ws["!ref"]);
+	ws["!ref"] = encode_range(wsr);
 	return ws;
 }
 

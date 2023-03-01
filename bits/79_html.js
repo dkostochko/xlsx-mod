@@ -60,6 +60,7 @@ function html_to_sheet(str/*:string*/, _opts)/*:Workbook*/ {
 function make_html_row(ws/*:Worksheet*/, r/*:Range*/, R/*:number*/, o/*:Sheet2HTMLOpts*/)/*:string*/ {
 	var M/*:Array<Range>*/ = (ws['!merges'] ||[]);
 	var oo/*:Array<string>*/ = [];
+	var sp = ({}/*:any*/);
 	for(var C = r.s.c; C <= r.e.c; ++C) {
 		var RS = 0, CS = 0;
 		for(var j = 0; j < M.length; ++j) {
@@ -73,7 +74,7 @@ function make_html_row(ws/*:Worksheet*/, r/*:Range*/, R/*:number*/, o/*:Sheet2HT
 		var cell = o.dense ? (ws[R]||[])[C] : ws[coord];
 		/* TODO: html entities */
 		var w = (cell && cell.v != null) && (cell.h || escapehtml(cell.w || (format_cell(cell), cell.w) || "")) || "";
-		var sp = ({}/*:any*/);
+		sp = ({}/*:any*/);
 		if(RS > 1) sp.rowspan = RS;
 		if(CS > 1) sp.colspan = CS;
 		if(o.editable) w = '<span contenteditable="true">' + w + '</span>';
@@ -96,9 +97,14 @@ var HTML_END = '</body></html>';
 function html_to_workbook(str/*:string*/, opts)/*:Workbook*/ {
 	var mtch = str.match(/<table[\s\S]*?>[\s\S]*?<\/table>/gi);
 	if(!mtch || mtch.length == 0) throw new Error("Invalid HTML: could not find <table>");
-	if(mtch.length == 1) return sheet_to_workbook(html_to_sheet(mtch[0], opts), opts);
+	if(mtch.length == 1) {
+		var w = sheet_to_workbook(html_to_sheet(mtch[0], opts), opts);
+		w.bookType = "html";
+		return w;
+	}
 	var wb = book_new();
 	mtch.forEach(function(s, idx) { book_append_sheet(wb, html_to_sheet(s, opts), "Sheet" + (idx+1)); });
+	wb.bookType = "html";
 	return wb;
 }
 
@@ -121,6 +127,12 @@ function sheet_to_html(ws/*:Worksheet*/, opts/*:?Sheet2HTMLOpts*//*, wb:?Workboo
 }
 
 function sheet_add_dom(ws/*:Worksheet*/, table/*:HTMLElement*/, _opts/*:?any*/)/*:Worksheet*/ {
+	var rows/*:HTMLCollection<HTMLTableRowElement>*/ = table.rows;
+	if(!rows) {
+		/* not an HTML TABLE */
+		throw "Unsupported origin when " + table.tagName + " is not a TABLE";
+	}
+
 	var opts = _opts || {};
 	if(DENSE != null) opts.dense = DENSE;
 	var or_R = 0, or_C = 0;
@@ -132,7 +144,6 @@ function sheet_add_dom(ws/*:Worksheet*/, table/*:HTMLElement*/, _opts/*:?any*/)/
 		}
 	}
 
-	var rows/*:HTMLCollection<HTMLTableRowElement>*/ = table.getElementsByTagName('tr');
 	var sheetRows = Math.min(opts.sheetRows||10000000, rows.length);
 	var range/*:Range*/ = {s:{r:0,c:0},e:{r:or_R,c:or_C}};
 	if(ws["!ref"]) {
@@ -153,7 +164,7 @@ function sheet_add_dom(ws/*:Worksheet*/, table/*:HTMLElement*/, _opts/*:?any*/)/
 			if (opts.display) continue;
 			rowinfo[R] = {hidden: true};
 		}
-		var elts/*:HTMLCollection<HTMLTableCellElement>*/ = (row.children/*:any*/);
+		var elts/*:HTMLCollection<HTMLTableCellElement>*/ = (row.cells);
 		for(_C = C = 0; _C < elts.length; ++_C) {
 			var elt/*:HTMLTableCellElement*/ = elts[_C];
 			if (opts.display && is_dom_element_hidden(elt)) continue;
@@ -209,7 +220,9 @@ function parse_dom_table(table/*:HTMLElement*/, _opts/*:?any*/)/*:Worksheet*/ {
 }
 
 function table_to_book(table/*:HTMLElement*/, opts/*:?any*/)/*:Workbook*/ {
-	return sheet_to_workbook(parse_dom_table(table, opts), opts);
+	var o = sheet_to_workbook(parse_dom_table(table, opts), opts);
+	//o.bookType = "dom"; // TODO: define a type for this
+	return o;
 }
 
 function is_dom_element_hidden(element/*:HTMLElement*/)/*:boolean*/ {

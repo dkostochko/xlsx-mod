@@ -1,4 +1,5 @@
 var assert = function(bool) { if(!bool) { throw new Error("failed assert"); } };
+assert.ok = function(bool) { if(!bool) { throw new Error("failed assert"); } };
 assert.deepEqualArray = function(x,y) {
 	if(x.length != y.length) throw new Error("Length mismatch: " + x.length + " != " + y.length);
 	for(var i = 0; i < x.length; ++i) assert.deepEqual(x[i], y[i]);
@@ -19,6 +20,7 @@ function require(s) {
 	switch(s) {
 		case 'fs': return fs;
 		case 'assert': return assert;
+		case './dist/xlsx.zahl': return XLSX_ZAHL_PAYLOAD;
 		case './': return XLSX;
 	}
 	if(s.slice(-5) == ".json") return JSON.parse(fs.readFileSync(s));

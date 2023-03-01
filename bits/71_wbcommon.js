@@ -113,7 +113,7 @@ function safe1904(wb/*:Workbook*/)/*:string*/ {
 	return parsexmlbool(wb.Workbook.WBProps.date1904) ? "true" : "false";
 }
 
-var badchars = /*#__PURE__*/"][*?\/\\".split("");
+var badchars = /*#__PURE__*/":][*?\/\\".split("");
 function check_ws_name(n/*:string*/, safe/*:?boolean*/)/*:boolean*/ {
 	if(n.length > 31) { if(safe) return false; throw new Error("Sheet names cannot exceed 31 chars"); }
 	var _good = true;
@@ -140,5 +140,16 @@ function check_wb(wb) {
 	var Sheets = (wb.Workbook && wb.Workbook.Sheets) || [];
 	check_wb_names(wb.SheetNames, Sheets, !!wb.vbaraw);
 	for(var i = 0; i < wb.SheetNames.length; ++i) check_ws(wb.Sheets[wb.SheetNames[i]], wb.SheetNames[i], i);
+	wb.SheetNames.forEach(function(n, i) {
+		var ws = wb.Sheets[n];
+		if(!ws || !ws["!autofilter"]) return;
+		var DN;
+		if(!wb.Workbook) wb.Workbook = {};
+		if(!wb.Workbook.Names) wb.Workbook.Names = [];
+		wb.Workbook.Names.forEach(function(dn) { if(dn.Name == "_xlnm._FilterDatabase" && dn.Sheet == i) DN = dn; });
+		var nn = formula_quote_sheet_name(n) + "!" + fix_range(ws["!autofilter"].ref);
+		if(DN) DN.Ref = nn;
+		else wb.Workbook.Names.push({Name: "_xlnm._FilterDatabase", Sheet: i, Ref: nn});
+	});
 	/* TODO: validate workbook */
 }

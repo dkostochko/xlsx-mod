@@ -144,7 +144,15 @@ export interface ParsingOptions extends CommonOptions {
     /** Input data encoding */
     type?: 'base64' | 'binary' | 'buffer' | 'file' | 'array' | 'string';
 
-    /** Default codepage */
+    /**
+     * Default codepage for legacy files
+     *
+     * This requires encoding support to be loaded.  It is automatically loaded
+     * in `xlsx.full.min.js` and in CommonJS / Extendscript, but an extra step
+     * is required in React / Angular / Webpack ESM deployments.
+     *
+     * Check the relevant guide https://docs.sheetjs.com/docs/getting-started/
+     */
     codepage?: number;
 
     /**
@@ -261,6 +269,17 @@ export interface WritingOptions extends CommonOptions, SheetOption {
     /** Override workbook properties on save */
     Props?: Properties;
 
+    /**
+     * Desired codepage for legacy file formats
+     *
+     * This requires encoding support to be loaded.  It is automatically loaded
+     * in `xlsx.full.min.js` and in CommonJS / Extendscript, but an extra step
+     * is required in React / Angular / Webpack / ESM deployments.
+     *
+     * Check the relevant guide https://docs.sheetjs.com/docs/getting-started/
+     */
+    codepage?: number;
+
     /** Base64 encoding of NUMBERS base for exports */
     numbers?: string;
 }
@@ -285,6 +304,9 @@ export interface WorkBook {
     Workbook?: WBProps;
 
     vbaraw?: any;
+
+    /** Original file type (when parsed with `read` or `readFile`) */
+    bookType?: BookType;
 }
 
 export interface SheetProps {
@@ -841,8 +863,8 @@ export interface XLSX$Utils {
     /** Creates a new workbook */
     book_new(): WorkBook;
 
-    /** Append a worksheet to a workbook */
-    book_append_sheet(workbook: WorkBook, worksheet: WorkSheet, name?: string, roll?: boolean): void;
+    /** Append a worksheet to a workbook, returns new worksheet name */
+    book_append_sheet(workbook: WorkBook, worksheet: WorkSheet, name?: string, roll?: boolean): string;
 
     /** Set sheet visibility (visible/hidden/very hidden) */
     book_set_sheet_visibility(workbook: WorkBook, sheet: number|string, visibility: number): void;
