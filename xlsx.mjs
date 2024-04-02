@@ -21853,6 +21853,7 @@ function make_html_row(ws/*:Worksheet*/, r/*:Range*/, R/*:number*/, o/*:Sheet2HT
 			sp["data-t"] = cell && cell.t || 'z';
 			if(cell.v != null) sp["data-v"] = cell.v;
 			if(cell.z != null) sp["data-z"] = cell.z;
+			if(cell.style) sp["style"] = cell.style;
 			if(cell.l && (cell.l.Target || "#").charAt(0) != "#") w = '<a href="' + cell.l.Target +'">' + w + '</a>';
 		}
 		sp.id = (o.id || "sjs") + "-" + coord;
