@@ -1,5 +1,5 @@
 {
-	"name": "xlsx",
+	"name": "@tablefilter/xlsx-mod",
 	"version": "0.18.7",
 	"author": "sheetjs",
 	"description": "SheetJS Spreadsheet data parser and writer",
@@ -91,9 +91,6 @@
 		]
 	},
 	"homepage": "https://sheetjs.com/",
-	"bugs": {
-		"url": "https://github.com/SheetJS/sheetjs/issues"
-	},
 	"license": "Apache-2.0",
 	"engines": {
 		"node": ">=0.8"
