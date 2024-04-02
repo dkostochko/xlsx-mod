@@ -8397,21 +8397,21 @@ function LightenDarkenColor(sixColor, tint){
 	return rgb2Hex(hsl2RGB(hsl));
 }
 
-function getColor(color, styles){
-	var clrScheme = styles["clrScheme"];
-	var indexedColorsInner = styles["indexedColors"];
+function getColor(colorInfo, styles){
+	var clrScheme = styles.clrScheme;
+	var indexedColorsInner = styles.indexedColors;
 	var indexedColorsList = combineIndexedColor(indexedColorsInner, indexedColors);
-	var indexed = color.indexed, rgb = color.rgb, theme = color.theme, tint = color.tint;
-	var bg;
+	var indexed = colorInfo.indexed, rgb = colorInfo.rgb, theme = colorInfo.theme, tint = colorInfo.tint;
+	var color;
 	if(indexed!=null){
 		var indexedNum = parseInt(indexed);
-		bg = indexedColorsList[indexedNum];
-		if(bg!=null){
-			bg = bg.substring(bg.length-6, bg.length);
+		color = indexedColorsList[indexedNum];
+		if(color!=null){
+			color = color.substring(color.length-6, color.length);
 		}
 	}
 	else if(rgb!=null){
-		bg = rgb.substring(rgb.length-6, rgb.length);
+		color = rgb.substring(rgb.length-6, rgb.length);
 	}
 	else if(theme!=null){
 /*		var themeNum = parseInt(theme);
@@ -8429,18 +8429,18 @@ function getColor(color, styles){
 		}*/
 		var clrSchemeElement = clrScheme[theme];
 		if(clrSchemeElement!=null){
-			bg = clrSchemeElement.rgb;
+			color = clrSchemeElement.rgb;
 		}
 	}
-
+	var tintedColor = color;
 	if(tint!=null){
 		var tintNum = parseFloat(tint);
-		if(bg!=null){
-			bg = LightenDarkenColor(bg, tintNum);
+		if(color!=null){
+			tintedColor = LightenDarkenColor(color, tintNum);
 		}
 	}
 
-	return bg ? bg.toLowerCase() : bg;
+	return [color ? color.toLowerCase() : color, tintedColor ? tintedColor.toLowerCase() : tintedColor];
 }
 
 function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, opts, themes, styles, cellFormat) {
@@ -8479,11 +8479,16 @@ function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, opts, the
 	}
 	if(fillid != null) try {
 		p.s =  styles.Fills[fillid];
+		var color;
 		if (p.s.fgColor && !p.s.fgColor.rgb && !!themes.themeElements) {
-			p.s.fgColor.rgb = getColor(p.s.fgColor, themes.themeElements);
+			color = getColor(p.s.fgColor, themes.themeElements);
+			p.s.fgColor.rgb = color[1];
+			if(opts.WTF) p.s.fgColor.raw_rgb = color[0];
 		}
 		if (p.s.bgColor && !p.s.bgColor.rgb && !!themes.themeElements) {
-			p.s.bgColor.rgb = getColor(p.s.bgColor, themes.themeElements);
+			color = getColor(p.s.fgColor, themes.themeElements);
+			p.s.bgColor.rgb = color[1];
+			if(opts.WTF) p.s.bgColor.raw_rgb = color[0];
 		}
 		//console.log("Colors", p.s.fgColor, p.s.bgColor);
 		/*if (p.s.fgColor && p.s.fgColor.theme && !p.s.fgColor.rgb) {
