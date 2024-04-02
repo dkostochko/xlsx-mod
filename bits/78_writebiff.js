@@ -68,7 +68,7 @@ function write_ws_biff2_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:n
 		case 'b': case 'e': write_biff_rec(ba, 0x0005, write_BIFF2BERR(R, C, cell.v, cell.t)); return;
 		/* TODO: codepage, sst */
 		case 's': case 'str':
-			write_biff_rec(ba, 0x0004, write_BIFF2LABEL(R, C, (cell.v||"").slice(0,255)));
+			write_biff_rec(ba, 0x0004, write_BIFF2LABEL(R, C, cell.v == null ? "" : String(cell.v).slice(0,255)));
 			return;
 	}
 	write_biff_rec(ba, 0x0001, write_BIFF2Cell(null, R, C));
@@ -192,9 +192,9 @@ function write_ws_biff8_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:n
 		/* TODO: codepage, sst */
 		case 's': case 'str':
 			if(opts.bookSST) {
-				var isst = get_sst_id(opts.Strings, cell.v, opts.revStrings);
+				var isst = get_sst_id(opts.Strings, cell.v == null ? "" : String(cell.v), opts.revStrings);
 				write_biff_rec(ba, 0x00fd /* LabelSst */, write_LabelSst(R, C, isst, os, opts));
-			} else write_biff_rec(ba, 0x0204 /* Label */, write_Label(R, C, (cell.v||"").slice(0,255), os, opts));
+			} else write_biff_rec(ba, 0x0204 /* Label */, write_Label(R, C, (cell.v == null ? "" : String(cell.v)).slice(0,255), os, opts));
 			break;
 		default:
 			write_biff_rec(ba, 0x0201 /* Blank */, write_XLSCell(R, C, os));
@@ -238,10 +238,11 @@ function write_ws_biff8(idx/*:number*/, opts, wb/*:Workbook*/) {
 	/* ... */
 	if(b8) write_ws_cols_biff8(ba, ws["!cols"]);
 	/* ... */
-	write_biff_rec(ba, 0x200, write_Dimensions(range, opts));
+	write_biff_rec(ba, 0x0200 /* Dimensions */, write_Dimensions(range, opts));
 	/* ... */
 
 	if(b8) ws['!links'] = [];
+	var comments = [];
 	for(var R = range.s.r; R <= range.e.r; ++R) {
 		rr = encode_row(R);
 		for(var C = range.s.c; C <= range.e.c; ++C) {
@@ -252,9 +253,12 @@ function write_ws_biff8(idx/*:number*/, opts, wb/*:Workbook*/) {
 			/* write cell */
 			write_ws_biff8_cell(ba, cell, R, C, opts);
 			if(b8 && cell.l) ws['!links'].push([ref, cell.l]);
+			if(b8 && cell.c) comments.push([ref, cell.c]);
 		}
 	}
 	var cname/*:string*/ = _sheet.CodeName || _sheet.name || s;
+	/* ... */
+	// if(b8) comments.forEach(function(comment) { write_biff_rec(ba, 0x001c /* Note */, write_NoteSh(comment)); });
 	/* ... */
 	if(b8) write_biff_rec(ba, 0x023e /* Window2 */, write_Window2((_WB.Views||[])[0]));
 	/* ... */
@@ -323,11 +327,11 @@ function write_biff8_global(wb/*:Workbook*/, bufs, opts/*:WriteOpts*/) {
 
 	var C = buf_array();
 	/* METADATA [MTRSettings] [ForceFullCalculation] */
-	if(b8) write_biff_rec(C, 0x008C, write_Country());
+	if(b8) write_biff_rec(C, 0x008C /* Country */, write_Country());
 	/* *SUPBOOK *LBL *RTD [RecalcId] *HFPicture *MSODRAWINGGROUP */
 
 	/* BIFF8: [SST *Continue] ExtSST */
-	if(b8 && opts.Strings) write_biff_continue(C, 0x00FC, write_SST(opts.Strings, opts));
+	if(b8 && opts.Strings) write_biff_continue(C, 0x00FC /* SST */, write_SST(opts.Strings, opts));
 
 	/* *WebPub [WOpt] [CrErr] [BookExt] *FeatHdr *DConn [THEME] [CompressPictures] [Compat12] [GUIDTypeLib] */
 	write_biff_rec(C, 0x000A /* EOF */);
@@ -387,7 +391,7 @@ function write_biff_buf(wb/*:Workbook*/, opts/*:WriteOpts*/) {
 		if(!ws || !ws["!ref"]) continue;
 		var range = decode_range(ws["!ref"]);
 		if(range.e.c > 255) { // note: 255 is IV
-		if(typeof console != "undefined" && console.error) console.error("Worksheet '" + wb.SheetNames[i] + "' extends beyond column IV (255).  Data may be lost.");
+			if(typeof console != "undefined" && console.error) console.error("Worksheet '" + wb.SheetNames[i] + "' extends beyond column IV (255).  Data may be lost.");
 		}
 	}
 

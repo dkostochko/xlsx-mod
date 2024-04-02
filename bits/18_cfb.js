@@ -211,8 +211,15 @@ function parse_extra_field(blob/*:CFBlob*/)/*:any*/ {
 					if(flags & 4) p.ctime = blob.read_shift(4);
 				}
 				if(p.mtime) p.mt = new Date(p.mtime*1000);
-			}
-			break;
+			} break;
+			/* ZIP64 Extended Information Field */
+			case 0x0001: {
+				var sz1 = blob.read_shift(4), sz2 = blob.read_shift(4);
+				p.usz = (sz2 * Math.pow(2,32) + sz1);
+				sz1 = blob.read_shift(4); sz2 = blob.read_shift(4);
+				p.csz = (sz2 * Math.pow(2,32) + sz1);
+				// NOTE: volume fields are skipped
+			} break;
 		}
 		blob.l = tgt;
 		o[type] = p;
@@ -220,7 +227,7 @@ function parse_extra_field(blob/*:CFBlob*/)/*:any*/ {
 	return o;
 }
 var fs/*:: = require('fs'); */;
-function get_fs() { return fs || (fs = require('fs')); }
+function get_fs() { return fs || (fs = _fs); }
 function parse(file/*:RawBytes*/, options/*:CFBReadOpts*/)/*:CFBContainer*/ {
 if(file[0] == 0x50 && file[1] == 0x4b) return parse_zip(file, options);
 if((file[0] | 0x20) == 0x6d && (file[1]|0x20) == 0x69) return parse_mad(file, options);
@@ -1401,6 +1408,11 @@ function parse_zip(file/*:RawBytes*/, options/*:CFBReadOpts*/)/*:CFBContainer*/ 
 
 		var L = blob.l;
 		blob.l = offset + 4;
+		/* ZIP64 lengths */
+		if(EF && EF[0x0001]) {
+			if((EF[0x0001]||{}).usz) usz = EF[0x0001].usz;
+			if((EF[0x0001]||{}).csz) csz = EF[0x0001].csz;
+		}
 		parse_local_file(blob, csz, usz, o, EF);
 		blob.l = L;
 	}
@@ -1430,7 +1442,13 @@ function parse_local_file(blob/*:CFBlob*/, csz/*:number*/, usz/*:number*/, o/*:C
 	if(efsz) {
 		var ef = parse_extra_field(/*::(*/blob.slice(blob.l, blob.l + efsz)/*:: :any)*/);
 		if((ef[0x5455]||{}).mt) date = ef[0x5455].mt;
-		if(((EF||{})[0x5455]||{}).mt) date = EF[0x5455].mt;
+		if((ef[0x0001]||{}).usz) _usz = ef[0x0001].usz;
+		if((ef[0x0001]||{}).csz) _csz = ef[0x0001].csz;
+		if(EF) {
+			if((EF[0x5455]||{}).mt) date = EF[0x5455].mt;
+			if((EF[0x0001]||{}).usz) _usz = ef[0x0001].usz;
+			if((EF[0x0001]||{}).csz) _csz = ef[0x0001].csz;
+		}
 	}
 	blob.l += efsz;
 
@@ -1482,9 +1500,9 @@ function write_zip(cfb/*:CFBContainer*/, options/*:CFBWriteOpts*/)/*:RawBytes*/ 
 		var namebuf = new_buf(fp.length);
 		for(j = 0; j < fp.length; ++j) namebuf.write_shift(1, fp.charCodeAt(j) & 0x7F);
 		namebuf = namebuf.slice(0, namebuf.l);
-		crcs[fcnt] = CRC32.buf(/*::((*/fi.content/*::||[]):any)*/, 0);
+		crcs[fcnt] = typeof fi.content == "string" ? CRC32.bstr(fi.content, 0) : CRC32.buf(/*::((*/fi.content/*::||[]):any)*/, 0);
 
-		var outbuf = fi.content/*::||[]*/;
+		var outbuf = typeof fi.content == "string" ? s2a(fi.content) : fi.content/*::||[]*/;
 		if(method == 8) outbuf = _deflateRawSync(outbuf);
 
 		/* local file header */

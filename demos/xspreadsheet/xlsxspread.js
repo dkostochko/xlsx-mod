@@ -2,6 +2,7 @@
 /* eslint-env browser */
 /*global XLSX */
 /*exported stox, xtos */
+console.log("The latest version of the xlsxspread.js script is at https://cdn.sheetjs.com/xspreadsheet/xlsxspread.js !")
 
 /**
  * Converts data from SheetJS to x-spreadsheet
@@ -15,6 +16,7 @@ function stox(wb) {
   wb.SheetNames.forEach(function (name) {
     var o = { name: name, rows: {} };
     var ws = wb.Sheets[name];
+    if(!ws || !ws["!ref"]) return;
     var range = XLSX.utils.decode_range(ws['!ref']);
     // sheet_to_json will lost empty row and col at begin as default
     range.s = { r: 0, c: 0 };
@@ -91,8 +93,8 @@ function xtos(sdata) {
         if (!cellText) {
           cellText = "";
           type = "z";
-        } else if (!isNaN(parseFloat(cellText))) {
-          cellText = parseFloat(cellText);
+        } else if (!isNaN(Number(cellText))) {
+          cellText = Number(cellText);
           type = "n";
         } else if (cellText.toLowerCase() === "true" || cellText.toLowerCase() === "false") {
           cellText = Boolean(cellText);
@@ -128,3 +130,4 @@ function xtos(sdata) {
 
   return out;
 }
+

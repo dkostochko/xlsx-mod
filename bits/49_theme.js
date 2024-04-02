@@ -18,11 +18,11 @@ function parse_clrScheme(t, themes, opts) {
 			/* 20.1.2.3.32 srgbClr CT_SRgbColor */
 			case '<a:srgbClr':
 				color.rgb = y.val; break;
-
+			case '</a:srgbClr>': break;
 			/* 20.1.2.3.33 sysClr CT_SystemColor */
 			case '<a:sysClr':
 				color.rgb = y.lastClr; break;
-
+			case '</a:sysClr>': break;
 			/* 20.1.4.1.1 accent1 (Accent 1) */
 			/* 20.1.4.1.2 accent2 (Accent 2) */
 			/* 20.1.4.1.3 accent3 (Accent 3) */

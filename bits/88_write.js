@@ -81,7 +81,7 @@ function write_string_type(out/*:string*/, opts/*:WriteOpts*/, bom/*:?string*/)/
 
 function write_stxt_type(out/*:string*/, opts/*:WriteOpts*/)/*:any*/ {
 	switch(opts.type) {
-		case "base64": return Base64_encode(out);
+		case "base64": return Base64_encode_pass(out);
 		case "binary": return out;
 		case "string": return out; /* override in sheet_to_txt */
 		case "file": return write_dl(opts.file, out, 'binary');
@@ -134,7 +134,7 @@ function writeSync(wb/*:Workbook*/, opts/*:?WriteOpts*/) {
 		case 'xml':
 		case 'xlml': return write_string_type(write_xlml(wb, o), o);
 		case 'slk':
-		case 'sylk': return write_string_type(SYLK.from_sheet(wb.Sheets[wb.SheetNames[idx]], o), o);
+		case 'sylk': return write_string_type(SYLK.from_sheet(wb.Sheets[wb.SheetNames[idx]], o, wb), o);
 		case 'htm':
 		case 'html': return write_string_type(sheet_to_html(wb.Sheets[wb.SheetNames[idx]], o), o);
 		case 'txt': return write_stxt_type(sheet_to_txt(wb.Sheets[wb.SheetNames[idx]], o), o);
@@ -142,7 +142,7 @@ function writeSync(wb/*:Workbook*/, opts/*:?WriteOpts*/) {
 		case 'dif': return write_string_type(DIF.from_sheet(wb.Sheets[wb.SheetNames[idx]], o), o);
 		case 'dbf': return write_binary_type(DBF.from_sheet(wb.Sheets[wb.SheetNames[idx]], o), o);
 		case 'prn': return write_string_type(PRN.from_sheet(wb.Sheets[wb.SheetNames[idx]], o), o);
-		case 'rtf': return write_string_type(RTF.from_sheet(wb.Sheets[wb.SheetNames[idx]], o), o);
+		case 'rtf': return write_string_type(sheet_to_rtf(wb.Sheets[wb.SheetNames[idx]], o), o);
 		case 'eth': return write_string_type(ETH.from_sheet(wb.Sheets[wb.SheetNames[idx]], o), o);
 		case 'fods': return write_string_type(write_ods(wb, o), o);
 		case 'wk1': return write_binary_type(WK_.sheet_to_wk1(wb.Sheets[wb.SheetNames[idx]], o), o);

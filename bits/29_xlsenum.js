@@ -258,8 +258,8 @@ var _XLSIcv = /*#__PURE__*/ rgbify([
 	0x333333,
 
 	/* Other entries to appease BIFF8/12 */
-	0xFFFFFF, /* 0x40 icvForeground ?? */
-	0x000000, /* 0x41 icvBackground ?? */
+	0x000000, /* 0x40 icvForeground ?? */
+	0xFFFFFF, /* 0x41 icvBackground ?? */
 	0x000000, /* 0x42 icvFrame ?? */
 	0x000000, /* 0x43 icv3D ?? */
 	0x000000, /* 0x44 icv3DText ?? */
@@ -303,4 +303,21 @@ var RBErr = {
 	"#GETTING_DATA": 0x2B,
 	"#WTF?":         0xFF
 };
+
+var XLSLblBuiltIn = [
+	"_xlnm.Consolidate_Area",
+	"_xlnm.Auto_Open",
+	"_xlnm.Auto_Close",
+	"_xlnm.Extract",
+	"_xlnm.Database",
+	"_xlnm.Criteria",
+	"_xlnm.Print_Area",
+	"_xlnm.Print_Titles",
+	"_xlnm.Recorder",
+	"_xlnm.Data_Form",
+	"_xlnm.Auto_Activate",
+	"_xlnm.Auto_Deactivate",
+	"_xlnm.Sheet_Title",
+	"_xlnm._FilterDatabase"
+];
 
