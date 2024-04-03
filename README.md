@@ -29,10 +29,10 @@ processing library
 - [`codepage`](https://git.sheetjs.com/SheetJS/js-codepage): Legacy text
 encodings for XLS and other legacy spreadsheet formats
 
-- [`dta`](packages/dta): Stata DTA file processor
+- [`dta`](packages/dta): State DTA file processor
 
 - [`test_files`](https://github.com/sheetjs/test_files): Test files and various
-plaintext baselines.
+plain text baselines.
 
 ## License
 
