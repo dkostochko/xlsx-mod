@@ -37,11 +37,33 @@ function Base64_encode_pass(input: string): string {
 	}
 	return o;
 }
+function Base64_encode_arr(input: Uint8Array|number[]): string {
+	var o = "";
+	var c1=0, c2=0, c3=0, e1=0, e2=0, e3=0, e4=0;
+	for(var i = 0; i < input.length; ) {
+		c1 = input[i++];
+		e1 = (c1 >> 2);
+
+		c2 = input[i++];
+		e2 = ((c1 & 3) << 4) | (c2 >> 4);
+
+		c3 = input[i++];
+		e3 = ((c2 & 15) << 2) | (c3 >> 6);
+		e4 = (c3 & 63);
+		if (isNaN(c2)) { e3 = e4 = 64; }
+		else if (isNaN(c3)) { e4 = 64; }
+		o += Base64_map.charAt(e1) + Base64_map.charAt(e2) + Base64_map.charAt(e3) + Base64_map.charAt(e4);
+	}
+	return o;
+}
 function Base64_decode(input: string): string {
 	var o = "";
 	var c1=0, c2=0, c3=0, e1=0, e2=0, e3=0, e4=0;
-	input = input.replace(/^data:([^\/]+\/[^\/]+)?;base64\,/,'')
-	             .replace(/[^\w\+\/\=]/g, "")
+	if(input.slice(0,5) == "data:") {
+    var i = input.slice(0, 1024).indexOf(";base64,");
+    if(i > -1) input = input.slice(i+8);
+  }
+	input = input.replace(/[^\w\+\/\=]/g, "");
 	for(var i = 0; i < input.length;) {
 		e1 = Base64_map.indexOf(input.charAt(i++));
 		e2 = Base64_map.indexOf(input.charAt(i++));

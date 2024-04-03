@@ -107,15 +107,14 @@ function parse_rpr(rpr) {
 }
 
 var parse_rs = /*#__PURE__*/(function() {
-	var tregex = matchtag("t"), rpregex = matchtag("rPr");
 	/* 18.4.4 r CT_RElt */
 	function parse_r(r) {
 		/* 18.4.12 t ST_Xstring */
-		var t = r.match(tregex)/*, cp = 65001*/;
+		var t = str_match_xml_ns(r, "t")/*, cp = 65001*/;
 		if(!t) return {t:"s", v:""};
 
 		var o/*:Cell*/ = ({t:'s', v:unescapexml(t[1])}/*:any*/);
-		var rpr = r.match(rpregex);
+		var rpr = str_match_xml_ns(r, "rPr");
 		if(rpr) o.s = parse_rpr(rpr[1]);
 		return o;
 	}
@@ -168,7 +167,7 @@ var rs_to_html = /*#__PURE__*/(function parse_rs_factory() {
 })();
 
 /* 18.4.8 si CT_Rst */
-var sitregex = /<(?:\w+:)?t[^>]*>([^<]*)<\/(?:\w+:)?t>/g, sirregex = /<(?:\w+:)?r>/;
+var sitregex = /<(?:\w+:)?t[^>]*>([^<]*)<\/(?:\w+:)?t>/g, sirregex = /<(?:\w+:)?r\b[^>]*>/;
 var sirphregex = /<(?:\w+:)?rPh.*?>([\s\S]*?)<\/(?:\w+:)?rPh>/g;
 function parse_si(x, opts) {
 	var html = opts ? opts.cellHTML : true;

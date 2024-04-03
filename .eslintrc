@@ -11,6 +11,7 @@
 		"comma-dangle": [ 2, "never" ],
 		"curly": 0,
 		"no-bitwise": 0,
+		"no-cond-assign": 1,
 		"no-console": 0,
 		"no-control-regex": 0,
 		"no-unused-vars": 1,
