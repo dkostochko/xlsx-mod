@@ -69,7 +69,7 @@ clean-data:
 init: ## Initial setup for development
 	rm -rf test_files
 	if [ ! -e test_files.zip ]; then curl -LO https://test-files.sheetjs.com/test_files.zip; fi
-	unzip test_files.zip
+	unzip -q test_files.zip
 	mkdir -p tmp
 
 DISTHDR=misc/suppress_export.js
