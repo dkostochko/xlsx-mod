@@ -69,9 +69,9 @@ function Base64_decode(input) {
   var o = "";
   var c1 = 0, c2 = 0, c3 = 0, e1 = 0, e2 = 0, e3 = 0, e4 = 0;
   if (input.slice(0, 5) == "data:") {
-    var i = input.slice(0, 1024).indexOf(";base64,");
-    if (i > -1)
-      input = input.slice(i + 8);
+    var _i = input.slice(0, 1024).indexOf(";base64,");
+    if (_i > -1)
+      input = input.slice(_i + 8);
   }
   input = input.replace(/[^\w\+\/\=]/g, "");
   for (var i = 0; i < input.length; ) {
