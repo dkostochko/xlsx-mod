@@ -35,7 +35,7 @@ function readFileSync2(x: string, e?: ShEncoding): Uint8Array | string {
 	if(!e) return u8;
 	switch(e) {
 		case 'utf-8': return new TextDecoder().decode(u8);
-		case 'base64': return base64_.encode(u8);
+		case 'base64': return base64_.encodeBase64(u8);
 		case 'buffer': return u8;
 		case 'binary': return Array.from({length: u8.length}, (_,i) => String.fromCharCode(u8[i])).join("");
 	}
@@ -1310,29 +1310,29 @@ Deno.test('parse features', async function(t) {
 		/*eslint-disable */
 		var exp/*:Array<any>*/ = [
 			{ patternType: 'darkHorizontal',
-			  fgColor: { theme: 9, raw_rgb: 'F79646' },
-			  bgColor: { theme: 5, raw_rgb: 'C0504D' } },
+				fgColor: { theme: 9, raw_rgb: 'f79646' },
+				bgColor: { theme: 5, raw_rgb: 'c0504d' } },
 			{ patternType: 'darkUp',
-			  fgColor: { theme: 3, raw_rgb: '1F497D' },
-			  bgColor: { theme: 7, raw_rgb: '8064A2' } },
+				fgColor: { theme: 3, raw_rgb: '1f497d' },
+				bgColor: { theme: 7, raw_rgb: '8064a2' } },
 			{ patternType: 'darkGray',
-			  fgColor: { theme: 3, raw_rgb: '1F497D' },
-			  bgColor: { theme: 1, raw_rgb: '000000' } },
+				fgColor: { theme: 3, raw_rgb: '1f497d' },
+				bgColor: { theme: 1, raw_rgb: '000000' } },
 			{ patternType: 'lightGray',
-			  fgColor: { theme: 6, raw_rgb: '9BBB59' },
-			  bgColor: { theme: 2, raw_rgb: 'EEECE1' } },
+				fgColor: { theme: 6, raw_rgb: '9bbb59' },
+				bgColor: { theme: 2, raw_rgb: 'eeece1' } },
 			{ patternType: 'lightDown',
-			  fgColor: { theme: 4, raw_rgb: '4F81BD' },
-			  bgColor: { theme: 7, raw_rgb: '8064A2' } },
+				fgColor: { theme: 4, raw_rgb: '4f81bd' },
+				bgColor: { theme: 7, raw_rgb: '8064a2' } },
 			{ patternType: 'lightGrid',
-			  fgColor: { theme: 6, raw_rgb: '9BBB59' },
-			  bgColor: { theme: 9, raw_rgb: 'F79646' } },
+				fgColor: { theme: 6, raw_rgb: '9bbb59' },
+				bgColor: { theme: 9, raw_rgb: 'f79646' } },
 			{ patternType: 'lightGrid',
-			  fgColor: { theme: 4, raw_rgb: '4F81BD' },
-			  bgColor: { theme: 2, raw_rgb: 'EEECE1' } },
+				fgColor: { theme: 4, raw_rgb: '4f81bd' },
+				bgColor: { theme: 2, raw_rgb: 'eeece1' } },
 			{ patternType: 'lightVertical',
-			  fgColor: { theme: 3, raw_rgb: '1F497D' },
-			  bgColor: { theme: 7, raw_rgb: '8064A2' } }
+				fgColor: { theme: 3, raw_rgb: '1f497d' },
+				bgColor: { theme: 7, raw_rgb: '8064a2' } }
 		];
 		/*eslint-enable */
 		for(var rangei = 0; rangei < ranges.length; ++rangei) { let rng = ranges[rangei];
