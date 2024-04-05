@@ -244,98 +244,101 @@ function set_cptable(cptable) {
 var DENSE = null;
 var DIF_XL = true;
 var Base64_map = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+
 function Base64_encode(input) {
-  var o = "";
-  var c1 = 0, c2 = 0, c3 = 0, e1 = 0, e2 = 0, e3 = 0, e4 = 0;
-  for (var i = 0; i < input.length; ) {
-    c1 = input.charCodeAt(i++);
-    e1 = c1 >> 2;
-    c2 = input.charCodeAt(i++);
-    e2 = (c1 & 3) << 4 | c2 >> 4;
-    c3 = input.charCodeAt(i++);
-    e3 = (c2 & 15) << 2 | c3 >> 6;
-    e4 = c3 & 63;
-    if (isNaN(c2)) {
-      e3 = e4 = 64;
-    } else if (isNaN(c3)) {
-      e4 = 64;
+    var o = "";
+    var c1 = 0, c2 = 0, c3 = 0, e1 = 0, e2 = 0, e3 = 0, e4 = 0;
+    for (var i = 0; i < input.length;) {
+        c1 = input.charCodeAt(i++);
+        e1 = c1 >> 2;
+        c2 = input.charCodeAt(i++);
+        e2 = (c1 & 3) << 4 | c2 >> 4;
+        c3 = input.charCodeAt(i++);
+        e3 = (c2 & 15) << 2 | c3 >> 6;
+        e4 = c3 & 63;
+        if (isNaN(c2)) {
+            e3 = e4 = 64;
+        } else if (isNaN(c3)) {
+            e4 = 64;
+        }
+        o += Base64_map.charAt(e1) + Base64_map.charAt(e2) + Base64_map.charAt(e3) + Base64_map.charAt(e4);
     }
-    o += Base64_map.charAt(e1) + Base64_map.charAt(e2) + Base64_map.charAt(e3) + Base64_map.charAt(e4);
-  }
-  return o;
+    return o;
 }
+
 function Base64_encode_pass(input) {
-  var o = "";
-  var c1 = 0, c2 = 0, c3 = 0, e1 = 0, e2 = 0, e3 = 0, e4 = 0;
-  for (var i = 0; i < input.length; ) {
-    c1 = input.charCodeAt(i++);
-    if (c1 > 255)
-      c1 = 95;
-    e1 = c1 >> 2;
-    c2 = input.charCodeAt(i++);
-    if (c2 > 255)
-      c2 = 95;
-    e2 = (c1 & 3) << 4 | c2 >> 4;
-    c3 = input.charCodeAt(i++);
-    if (c3 > 255)
-      c3 = 95;
-    e3 = (c2 & 15) << 2 | c3 >> 6;
-    e4 = c3 & 63;
-    if (isNaN(c2)) {
-      e3 = e4 = 64;
-    } else if (isNaN(c3)) {
-      e4 = 64;
+    var o = "";
+    var c1 = 0, c2 = 0, c3 = 0, e1 = 0, e2 = 0, e3 = 0, e4 = 0;
+    for (var i = 0; i < input.length;) {
+        c1 = input.charCodeAt(i++);
+        if (c1 > 255)
+            c1 = 95;
+        e1 = c1 >> 2;
+        c2 = input.charCodeAt(i++);
+        if (c2 > 255)
+            c2 = 95;
+        e2 = (c1 & 3) << 4 | c2 >> 4;
+        c3 = input.charCodeAt(i++);
+        if (c3 > 255)
+            c3 = 95;
+        e3 = (c2 & 15) << 2 | c3 >> 6;
+        e4 = c3 & 63;
+        if (isNaN(c2)) {
+            e3 = e4 = 64;
+        } else if (isNaN(c3)) {
+            e4 = 64;
+        }
+        o += Base64_map.charAt(e1) + Base64_map.charAt(e2) + Base64_map.charAt(e3) + Base64_map.charAt(e4);
     }
-    o += Base64_map.charAt(e1) + Base64_map.charAt(e2) + Base64_map.charAt(e3) + Base64_map.charAt(e4);
-  }
-  return o;
+    return o;
 }
+
 function Base64_encode_arr(input) {
-  var o = "";
-  var c1 = 0, c2 = 0, c3 = 0, e1 = 0, e2 = 0, e3 = 0, e4 = 0;
-  for (var i = 0; i < input.length; ) {
-    c1 = input[i++];
-    e1 = c1 >> 2;
-    c2 = input[i++];
-    e2 = (c1 & 3) << 4 | c2 >> 4;
-    c3 = input[i++];
-    e3 = (c2 & 15) << 2 | c3 >> 6;
-    e4 = c3 & 63;
-    if (isNaN(c2)) {
-      e3 = e4 = 64;
-    } else if (isNaN(c3)) {
-      e4 = 64;
+    var o = "";
+    var c1 = 0, c2 = 0, c3 = 0, e1 = 0, e2 = 0, e3 = 0, e4 = 0;
+    for (var i = 0; i < input.length;) {
+        c1 = input[i++];
+        e1 = c1 >> 2;
+        c2 = input[i++];
+        e2 = (c1 & 3) << 4 | c2 >> 4;
+        c3 = input[i++];
+        e3 = (c2 & 15) << 2 | c3 >> 6;
+        e4 = c3 & 63;
+        if (isNaN(c2)) {
+            e3 = e4 = 64;
+        } else if (isNaN(c3)) {
+            e4 = 64;
+        }
+        o += Base64_map.charAt(e1) + Base64_map.charAt(e2) + Base64_map.charAt(e3) + Base64_map.charAt(e4);
     }
-    o += Base64_map.charAt(e1) + Base64_map.charAt(e2) + Base64_map.charAt(e3) + Base64_map.charAt(e4);
-  }
-  return o;
+    return o;
 }
+
 function Base64_decode(input) {
-  var o = "";
-  var c1 = 0, c2 = 0, c3 = 0, e1 = 0, e2 = 0, e3 = 0, e4 = 0;
-  if (input.slice(0, 5) == "data:") {
-    var i = input.slice(0, 1024).indexOf(";base64,");
-    if (i > -1)
-      input = input.slice(i + 8);
-  }
-  input = input.replace(/[^\w\+\/\=]/g, "");
-  for (var i = 0; i < input.length; ) {
-    e1 = Base64_map.indexOf(input.charAt(i++));
-    e2 = Base64_map.indexOf(input.charAt(i++));
-    c1 = e1 << 2 | e2 >> 4;
-    o += String.fromCharCode(c1);
-    e3 = Base64_map.indexOf(input.charAt(i++));
-    c2 = (e2 & 15) << 4 | e3 >> 2;
-    if (e3 !== 64) {
-      o += String.fromCharCode(c2);
+    var o = "";
+    var c1 = 0, c2 = 0, c3 = 0, e1 = 0, e2 = 0, e3 = 0, e4 = 0;
+    if (input.slice(0, 5) == "data:") {
+        var _i = input.slice(0, 1024).indexOf(";base64,");
+        if (_i > -1) input = input.slice(_i + 8);
     }
-    e4 = Base64_map.indexOf(input.charAt(i++));
-    c3 = (e3 & 3) << 6 | e4;
-    if (e4 !== 64) {
-      o += String.fromCharCode(c3);
+    input = input.replace(/[^\w\+\/\=]/g, "");
+    for (var i = 0; i < input.length;) {
+        e1 = Base64_map.indexOf(input.charAt(i++));
+        e2 = Base64_map.indexOf(input.charAt(i++));
+        c1 = e1 << 2 | e2 >> 4;
+        o += String.fromCharCode(c1);
+        e3 = Base64_map.indexOf(input.charAt(i++));
+        c2 = (e2 & 15) << 4 | e3 >> 2;
+        if (e3 !== 64) {
+            o += String.fromCharCode(c2);
+        }
+        e4 = Base64_map.indexOf(input.charAt(i++));
+        c3 = (e3 & 3) << 6 | e4;
+        if (e4 !== 64) {
+            o += String.fromCharCode(c3);
+        }
     }
-  }
-  return o;
+    return o;
 }
 var has_buf = (function() { return typeof Buffer !== 'undefined' && typeof undefined !== 'undefined' && typeof ({}) !== 'undefined' && !!({}).node; })();
 
@@ -3379,7 +3382,7 @@ function blobify(data) {
 }
 /* write or download file */
 function write_dl(fname, payload, enc) {
-	/*global IE_SaveFile, Blob, navigator, saveAs, document, File, chrome */
+	/*global IE_SaveFile, navigator, saveAs, document, chrome */
 	if(typeof _fs !== 'undefined' && _fs.writeFileSync) return enc ? _fs.writeFileSync(fname, payload, enc) : _fs.writeFileSync(fname, payload);
 	if(typeof Deno !== 'undefined') {
 		/* in this spot, it's safe to assume typed arrays and TextEncoder/TextDecoder exist */
