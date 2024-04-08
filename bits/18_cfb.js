@@ -73,7 +73,7 @@ function slice_by_16_tables(T) {
 		for(c = 256 + n; c < 4096; c += 256) v = table[c] = (v >>> 8) ^ T[v & 0xFF];
 	}
 	var out = [];
-	for(n = 1; n != 16; ++n) out[n - 1] = typeof Int32Array !== 'undefined' ? table.subarray(n * 256, n * 256 + 256) : table.slice(n * 256, n * 256 + 256);
+	for(n = 1; n != 16; ++n) out[n - 1] = typeof Int32Array !== 'undefined' && typeof table.subarray == "function" ? table.subarray(n * 256, n * 256 + 256) : table.slice(n * 256, n * 256 + 256);
 	return out;
 }
 var TT = slice_by_16_tables(T0);
@@ -306,7 +306,7 @@ sleuth_fat(difat_start, difat_sec_cnt, sectors, ssz, fat_addrs);
 /** Chains */
 var sector_list/*:SectorList*/ = make_sector_list(sectors, dir_start, fat_addrs, ssz);
 
-sector_list[dir_start].name = "!Directory";
+if(dir_start < sector_list.length) sector_list[dir_start].name = "!Directory";
 if(nmfs > 0 && minifat_start !== ENDOFCHAIN) sector_list[minifat_start].name = "!MiniFAT";
 sector_list[fat_addrs[0]].name = "!FAT";
 sector_list.fat_addrs = fat_addrs;
@@ -769,9 +769,9 @@ function _write(cfb/*:CFBContainer*/, options/*:CFBWriteOpts*/)/*:RawBytes|strin
 		file = cfb.FileIndex[i];
 		if(i === 0) file.start = file.size ? file.start - 1 : ENDOFCHAIN;
 		var _nm/*:string*/ = (i === 0 && _opts.root) || file.name;
-		if(_nm.length > 32) {
-			console.error("Name " + _nm + " will be truncated to " + _nm.slice(0,32));
-			_nm = _nm.slice(0, 32);
+		if(_nm.length > 31) {
+			console.error("Name " + _nm + " will be truncated to " + _nm.slice(0,31));
+			_nm = _nm.slice(0, 31);
 		}
 		flen = 2*(_nm.length+1);
 		o.write_shift(64, _nm, "utf16le");

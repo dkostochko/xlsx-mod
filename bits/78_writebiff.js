@@ -31,15 +31,6 @@ function write_biff_continue(ba/*:BufArray*/, type/*:number*/, payload, length/*
 	}
 }
 
-function write_BIFF2Cell(out, r/*:number*/, c/*:number*/) {
-	if(!out) out = new_buf(7);
-	out.write_shift(2, r);
-	out.write_shift(2, c);
-	out.write_shift(2, 0);
-	out.write_shift(1, 0);
-	return out;
-}
-
 function write_BIFF2BERR(r/*:number*/, c/*:number*/, val, t/*:?string*/) {
 	var out = new_buf(9);
 	write_BIFF2Cell(out, r, c);
@@ -56,60 +47,369 @@ function write_BIFF2LABEL(r/*:number*/, c/*:number*/, val) {
 	return out.l < out.length ? out.slice(0, out.l) : out;
 }
 
-function write_ws_biff2_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:number*//*::, opts*/) {
+function write_comments_biff2(ba/*:BufArray*/, comments/*:Array<[Comment[], number, number]>*/) {
+	comments.forEach(function(data) {
+		var text = data[0].map(function(cc) { return cc.t; }).join("");
+		// TODO: should '\n' be translated to '\r' to correct for Excel 5.0 bug when exporting to BIFF2/3 ?
+		if(text.length <= 2048) return write_biff_rec(ba, 0x001C, write_NOTE_BIFF2(text, data[1], data[2]));
+		write_biff_rec(ba, 0x001C, write_NOTE_BIFF2(text.slice(0, 2048), data[1], data[2], text.length));
+		for(var i = 2048; i < text.length; i += 2048)
+			write_biff_rec(ba, 0x001C, write_NOTE_BIFF2(text.slice(i, Math.min(i+2048, text.length)), -1, -1, Math.min(2048, text.length - i)));
+	});
+}
+
+/* TODO: BIFF3/4 use different records -- see comments*/
+function write_ws_biff2_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:number*/, opts, date1904/*:boolean*/) {
+	var ifmt = 0;
+	if(cell.z != null) {
+		ifmt = opts._BIFF2FmtTable.indexOf(cell.z);
+		if(ifmt == -1) { opts._BIFF2FmtTable.push(cell.z); ifmt = opts._BIFF2FmtTable.length - 1; }
+	}
+	var ixfe = 0;
+	if(cell.z != null) {
+		for(; ixfe < opts.cellXfs.length; ++ixfe) if(opts.cellXfs[ixfe].numFmtId == ifmt) break;
+		if(ixfe == opts.cellXfs.length) opts.cellXfs.push({numFmtId: ifmt});
+	}
 	if(cell.v != null) switch(cell.t) {
 		case 'd': case 'n':
-			var v = cell.t == 'd' ? datenum(parseDate(cell.v)) : cell.v;
-			if((v == (v|0)) && (v >= 0) && (v < 65536))
-				write_biff_rec(ba, 0x0002, write_BIFF2INT(R, C, v));
+			var v = cell.t == 'd' ? datenum(parseDate(cell.v, date1904), date1904) : cell.v;
+			if(opts.biff == 2 && (v == (v|0)) && (v >= 0) && (v < 65536))
+				// 0x027E (RK) in BIFF3/4
+				write_biff_rec(ba, 0x0002, write_BIFF2INT(R, C, v, ixfe, ifmt));
+			else if(isNaN(v))
+				// 0x0205 in BIFF3/4
+				write_biff_rec(ba, 0x0005, write_BIFF2BERR(R, C, 0x24, "e")); // #NUM!
+			else if(!isFinite(v))
+				// 0x0205 in BIFF3/4
+				write_biff_rec(ba, 0x0005, write_BIFF2BERR(R, C, 0x07, "e")); // #DIV/0!
 			else
-				write_biff_rec(ba, 0x0003, write_BIFF2NUM(R,C, v));
+				// 0x0203 in BIFF3/4
+				write_biff_rec(ba, 0x0003, write_BIFF2NUM(R,C, v, ixfe, ifmt));
 			return;
-		case 'b': case 'e': write_biff_rec(ba, 0x0005, write_BIFF2BERR(R, C, cell.v, cell.t)); return;
+		case 'b': case 'e':
+			// 0x0205 in BIFF3/4
+			write_biff_rec(ba, 0x0005, write_BIFF2BERR(R, C, cell.v, cell.t)); return;
 		/* TODO: codepage, sst */
 		case 's': case 'str':
+			// 0x0204 in BIFF3/4
 			write_biff_rec(ba, 0x0004, write_BIFF2LABEL(R, C, cell.v == null ? "" : String(cell.v).slice(0,255)));
 			return;
 	}
+	// 0x0201 in BIFF3/4
 	write_biff_rec(ba, 0x0001, write_BIFF2Cell(null, R, C));
 }
 
-function write_ws_biff2(ba/*:BufArray*/, ws/*:Worksheet*/, idx/*:number*/, opts/*::, wb:Workbook*/) {
-	var dense = Array.isArray(ws);
-	var range = safe_decode_range(ws['!ref'] || "A1"), ref/*:string*/, rr = "", cols/*:Array<string>*/ = [];
+function write_ws_biff2(ba/*:BufArray*/, ws/*:Worksheet*/, idx/*:number*/, opts, wb/*:Workbook*/) {
+	var dense = ws["!data"] != null;
+	var range = safe_decode_range(ws['!ref'] || "A1"), rr = "", cols/*:Array<string>*/ = [];
 	if(range.e.c > 0xFF || range.e.r > 0x3FFF) {
 		if(opts.WTF) throw new Error("Range " + (ws['!ref'] || "A1") + " exceeds format limit A1:IV16384");
 		range.e.c = Math.min(range.e.c, 0xFF);
 		range.e.r = Math.min(range.e.c, 0x3FFF);
-		ref = encode_range(range);
 	}
+	var date1904 = (((wb||{}).Workbook||{}).WBProps||{}).date1904;
+	var row = [], comments = [];
+	/* TODO: 0x0000 / 0x0200 dimensions? */
+	for(var C = range.s.c; C <= range.e.c; ++C) cols[C] = encode_col(C);
 	for(var R = range.s.r; R <= range.e.r; ++R) {
+		if(dense) row = ws["!data"][R] || [];
 		rr = encode_row(R);
-		for(var C = range.s.c; C <= range.e.c; ++C) {
-			if(R === range.s.r) cols[C] = encode_col(C);
-			ref = cols[C] + rr;
-			var cell = dense ? (ws[R]||[])[C] : ws[ref];
+		for(C = range.s.c; C <= range.e.c; ++C) {
+			var cell = dense ? row[C] : ws[cols[C] + rr];
 			if(!cell) continue;
 			/* write cell */
-			write_ws_biff2_cell(ba, cell, R, C, opts);
+			write_ws_biff2_cell(ba, cell, R, C, opts, date1904);
+			if(cell.c) comments.push([cell.c, R, C]);
 		}
 	}
+
+	/* ... 0x12 0x19 0x13 (Password) */
+	write_comments_biff2(ba, comments);
+	/* 0x3d (Window1) ... */
 }
 
 /* Based on test files */
 function write_biff2_buf(wb/*:Workbook*/, opts/*:WriteOpts*/) {
 	var o = opts || {};
-	if(DENSE != null && o.dense == null) o.dense = DENSE;
+
 	var ba = buf_array();
 	var idx = 0;
 	for(var i=0;i<wb.SheetNames.length;++i) if(wb.SheetNames[i] == o.sheet) idx=i;
 	if(idx == 0 && !!o.sheet && wb.SheetNames[0] != o.sheet) throw new Error("Sheet not found: " + o.sheet);
 	write_biff_rec(ba, (o.biff == 4 ? 0x0409 : (o.biff == 3 ? 0x0209 : 0x0009)), write_BOF(wb, 0x10, o));
-	/* ... */
-	write_ws_biff2(ba, wb.Sheets[wb.SheetNames[idx]], idx, o, wb);
-	/* ... */
+	if(((wb.Workbook||{}).WBProps||{}).date1904) write_biff_rec(ba, 0x0022, writebool(true));
+	o.cellXfs = [{numFmtId: 0}];
+	o._BIFF2FmtTable/*:Array<string>*/ = ["General"]; o._Fonts = [];
+	var body = buf_array();
+	write_ws_biff2(body, wb.Sheets[wb.SheetNames[idx]], idx, o, wb);
+
+	o._BIFF2FmtTable.forEach(function(f) {
+		if(o.biff <= 3) write_biff_rec(ba, 0x001E, write_BIFF2Format(f));
+		else write_biff_rec(ba, 0x041E, write_BIFF4Format(f));
+	});
+	o.cellXfs.forEach(function(xf) {
+		switch(o.biff) {
+			case 2: write_biff_rec(ba, 0x0043, write_BIFF2XF(xf)); break;
+			case 3: write_biff_rec(ba, 0x0243, write_BIFF3XF(xf)); break;
+			case 4: write_biff_rec(ba, 0x0443, write_BIFF4XF(xf)); break;
+		}
+	});
+	delete o._BIFF2FmtTable; delete o.cellXfs; delete o._Fonts;
+
+	ba.push(body.end());
 	write_biff_rec(ba, 0x000A);
 	return ba.end();
+}
+
+var b8oid = 1, b8ocnts/*:Array<[number, number, number]>*/ = [];
+function write_MsoDrawingGroup() {
+	var buf = new_buf(82 + 8 * b8ocnts.length);
+	/* [MS-ODRAW] 2.2.12 OfficeArtDggContainer */
+	buf.write_shift(2, 0x0F);
+	buf.write_shift(2, 0xF000);
+	buf.write_shift(4, 74 + 8 * b8ocnts.length);
+	/* 2.2.48 OfficeArtFDGGBlock */
+	{
+		buf.write_shift(2, 0);
+		buf.write_shift(2, 0xF006);
+		buf.write_shift(4, 16 + 8 * b8ocnts.length);
+		/* 2.2.47 OfficeArtFDGG */
+		{
+			buf.write_shift(4, b8oid);
+			buf.write_shift(4, b8ocnts.length+1);
+			var acc = 0; for(var i = 0; i < b8ocnts.length; ++i) acc += (b8ocnts[i] && b8ocnts[i][1] || 0); buf.write_shift(4, acc);
+			buf.write_shift(4, b8ocnts.length);
+		}
+		/* 2.2.46 OfficeArtIDCL + */
+		b8ocnts.forEach(function(b8) {
+			buf.write_shift(4, b8[0]);
+			buf.write_shift(4, b8[2]);
+		});
+	}
+	/* 2.2.9 OfficeArtFOPT */
+	{
+		buf.write_shift(2, 0x33); // 0x03 | (3 << 4)
+		buf.write_shift(2, 0xF00B);
+		buf.write_shift(4, 0x12); // 3 * 6
+		/* 2.3.21.15 Text Boolean Properties */
+		buf.write_shift(2, 0xBF); buf.write_shift(4, 0x00080008);
+		/* 2.3.7.2 fillColor */
+		buf.write_shift(2, 0x0181); buf.write_shift(4, 0x08000041);
+		/* 2.3.8.1 lineColor */
+		buf.write_shift(2, 0x01C0); buf.write_shift(4, 0x08000040);
+	}
+	/* 2.2.45 OfficeArtSplitMenuColorContainer */
+	{
+		buf.write_shift(2, 0x40);
+		buf.write_shift(2, 0xF11E);
+		buf.write_shift(4, 16);
+		buf.write_shift(4, 0x0800000D);
+		buf.write_shift(4, 0x0800000C);
+		buf.write_shift(4, 0x08000017);
+		buf.write_shift(4, 0x100000F7);
+	}
+	return buf;
+}
+function write_comments_biff8(ba/*:BufArray*/, comments/*:Array<[Comment[], number, number]>*/) {
+	var notes/*:Array<RawData>*/ = [], sz = 0, pl = buf_array(), baseid = b8oid;
+	var _oasc;
+	comments.forEach(function(c, ci) {
+		var author = "";
+		var text = c[0].map(function(t) { if(t.a && !author) author = t.a; return t.t; }).join("");
+		++b8oid;
+
+		/* 2.2.14 OfficeArtSpContainer */
+		{
+			var oasc = new_buf(0x96);
+			oasc.write_shift(2, 0x0F);
+			oasc.write_shift(2, 0xF004);
+			oasc.write_shift(4, 0x96);
+			/* 2.2.40 OfficeArtFSP */
+			{
+				oasc.write_shift(2, 0xca2); // 0x02 | (0xca << 4)
+				oasc.write_shift(2, 0xF00A);
+				oasc.write_shift(4, 8);
+				oasc.write_shift(4, b8oid);
+				oasc.write_shift(4, 0xA00);
+			}
+			/* 2.2.9 OfficeArtFOPT */
+			{
+				oasc.write_shift(2, 0xE3); // 0x03 | (14 << 4)
+				oasc.write_shift(2, 0xF00B);
+				oasc.write_shift(4, 0x54); // 14 * 6
+				/* 2.3.21.1 ITxid */
+				oasc.write_shift(2, 0x80); oasc.write_shift(4, 0);
+				/* 2.3.21.12 txdir */
+				oasc.write_shift(2, 0x8B); oasc.write_shift(4, 0x02);
+				/* 2.3.21.15 Text Boolean Properties */
+				oasc.write_shift(2, 0xBF); oasc.write_shift(4, 0x00080008);
+				/* 2.3.6.30 cxk */
+				oasc.write_shift(2, 0x0158); oasc.l += 4;
+				/* 2.3.7.2 fillColor */
+				oasc.write_shift(2, 0x0181); oasc.write_shift(4, 0x08000050);
+				/* 2.3.7.4 fillBackColor */
+				oasc.write_shift(2, 0x0183); oasc.write_shift(4, 0x08000050);
+				/* 2.3.7.6 fillCrMod */
+				oasc.write_shift(2, 0x0185); oasc.write_shift(4, 0x100000F4);
+				/* 2.3.7.43 Fill Style Boolean Properties */
+				oasc.write_shift(2, 0x01BF); oasc.write_shift(4, 0x00100010);
+				/* 2.3.8.1 lineColor */
+				oasc.write_shift(2, 0x01C0); oasc.write_shift(4, 0x08000051);
+				/* 2.3.8.4 lineCrMod */
+				oasc.write_shift(2, 0x01C3); oasc.write_shift(4, 0x100000F4);
+				/* 2.3.13.2 shadowColor */
+				oasc.write_shift(2, 0x0201); oasc.write_shift(4, 0x08000051);
+				/* 2.3.13.4 shadowCrMod */
+				oasc.write_shift(2, 0x0203); oasc.write_shift(4, 0x100000F4);
+				/* 2.3.13.23 Shadow Style Boolean Properties */
+				oasc.write_shift(2, 0x023F); oasc.write_shift(4, 0x00030001);
+				/* 2.3.4.44 Group Shape Boolean Properties */
+				oasc.write_shift(2, 0x03BF); oasc.write_shift(4, 0x00020000 | (c[0].hidden ? 2 : 0));
+			}
+			/* [MS-XLS] 2.5.193 OfficeArtClientAnchorSheet */
+			{
+				oasc.l += 2;
+				oasc.write_shift(2, 0xF010);
+				oasc.write_shift(4, 0x12);
+				oasc.write_shift(2, 0x3); // do not move or size with cells
+				oasc.write_shift(2, c[2] + 2); oasc.l += 2;
+				oasc.write_shift(2, c[1] + 1); oasc.l += 2;
+				oasc.write_shift(2, c[2] + 4); oasc.l += 2;
+				oasc.write_shift(2, c[1] + 5); oasc.l += 2;
+			}
+			/* [MS-XLS] 2.5.194 OfficeArtClientData */
+			{
+				oasc.l += 2;
+				oasc.write_shift(2, 0xF011);
+				oasc.l += 4;
+			}
+			oasc.l = 0x96;
+			if(ci == 0) /* write_biff_rec(pl, 0x003C, oasc); */ _oasc = oasc;
+			else write_biff_rec(pl, 0x00EC, oasc);
+		}
+		sz += 0x96;
+
+		/* [MS-XLS] 2.4.181 Obj */
+		{
+			var obj = new_buf(52); // 22 + 26 + 4
+			/* [MS-XLS] 2.5.143 FtCmo */
+			obj.write_shift(2, 0x15);
+			obj.write_shift(2, 0x12);
+			obj.write_shift(2, 0x19);
+			obj.write_shift(2, b8oid);
+			obj.write_shift(2, 0);
+			obj.l = 22;
+			/* [MS-XLS] 2.5.149 FtNts */
+			obj.write_shift(2, 0x0D);
+			obj.write_shift(2, 0x16);
+			obj.write_shift(4, 0x62726272);
+			obj.write_shift(4, 0x95374305);
+			obj.write_shift(4, 0x80301328);
+			obj.write_shift(4, 0x69696904 + b8oid*256);
+			obj.write_shift(2,0);
+			obj.write_shift(4,0);
+			// reserved
+			obj.l += 4;
+			write_biff_rec(pl, 0x005D, obj);
+		}
+
+		/* [MS-XLS] 2.5.195 OfficeArtClientTextbox */
+		{
+			var oact = new_buf(8);
+			oact.l += 2;
+			oact.write_shift(2, 0xF00D);
+			oact.l += 4;
+			write_biff_rec(pl, 0x00EC, oact);
+		}
+		sz += 8;
+
+		/* [MS-XLS] 2.4.329 TxO */
+		{
+			var txo = new_buf(18);
+			txo.write_shift(2, 0x12);
+			txo.l += 8;
+			txo.write_shift(2, text.length);
+			txo.write_shift(2, 0x10);
+			txo.l += 4;
+			write_biff_rec(pl, 0x01b6, txo);
+			/* text continue record TODO: switch to wide strings */
+			{
+				var cont = new_buf(1 + text.length);
+				cont.write_shift(1, 0);
+				cont.write_shift(text.length, text, "sbcs");
+				write_biff_rec(pl, 0x003C, cont);
+			}
+			/* formatting continue records */
+			{
+				var conf = new_buf(0x10);
+				conf.l += 8;
+				conf.write_shift(2, text.length);
+				conf.l += 6;
+				write_biff_rec(pl, 0x003C, conf);
+			}
+		}
+
+		/* 2.4.179 Note */
+		{
+			var notesh = new_buf(12 + author.length);
+			notesh.write_shift(2, c[1]);
+			notesh.write_shift(2, c[2]);
+			notesh.write_shift(2, 0 | (c[0].hidden ? 0 : 2));
+			notesh.write_shift(2, b8oid);
+			notesh.write_shift(2, author.length);
+			notesh.write_shift(1, 0);
+			notesh.write_shift(author.length, author, "sbcs");
+			notesh.l ++;
+			notes.push(notesh);
+		}
+	});
+	/* [MS-ODRAW] 2.2.13 OfficeArtDgContainer */
+	{
+		var hdr = new_buf(80);
+		hdr.write_shift(2, 0x0F);
+		hdr.write_shift(2, 0xF002);
+		hdr.write_shift(4, sz + hdr.length - 8);
+		/* [MS-ODRAW] 2.2.49 OfficeArtFDG */
+		{
+			hdr.write_shift(2, 0x10);
+			hdr.write_shift(2, 0xF008);
+			hdr.write_shift(4, 0x08);
+			hdr.write_shift(4, comments.length + 1);
+			hdr.write_shift(4, b8oid);
+		}
+		/* [MS-ODRAW] 2.2.16 OfficeArtSpgrContainer */
+		{
+			hdr.write_shift(2, 0x0f);
+			hdr.write_shift(2, 0xF003);
+			hdr.write_shift(4, sz + 0x30);
+			/* [MS-ODRAW] 2.2.14 OfficeArtSpContainer */
+			{
+				hdr.write_shift(2, 0x0f);
+				hdr.write_shift(2, 0xF004);
+				hdr.write_shift(4, 0x28);
+				/* [MS-ODRAW] 2.2.38 OfficeArtFSPGR */
+				{
+					hdr.write_shift(2, 0x01);
+					hdr.write_shift(2, 0xF009);
+					hdr.write_shift(4, 0x10);
+					hdr.l += 16;
+				}
+				/* [MS-ODRAW] 2.2.40 OfficeArtFSP */
+				{
+					hdr.write_shift(2, 0x02);
+					hdr.write_shift(2, 0xF00A);
+					hdr.write_shift(4, 0x08);
+					hdr.write_shift(4, baseid);
+					hdr.write_shift(4, 0x05);
+				}
+			}
+		}
+		write_biff_rec(ba, 0x00EC, /* hdr */ _oasc ? bconcat([hdr, _oasc]) : hdr);
+	}
+	ba.push(pl.end());
+	notes.forEach(function(n) { write_biff_rec(ba, 0x001C, n); });
+	b8ocnts.push([baseid, comments.length + 1, b8oid]);
+	++b8oid;
 }
 
 function write_FONTS_biff8(ba, data, opts) {
@@ -173,7 +473,7 @@ function write_ws_cols_biff8(ba, cols) {
 	});
 }
 
-function write_ws_biff8_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:number*/, opts) {
+function write_ws_biff8_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:number*/, opts, date1904/*:boolean*/) {
 	var os = 16 + get_cell_style(opts.cellXfs, cell, opts);
 	if(cell.v == null && !cell.bf) {
 		write_biff_rec(ba, 0x0201 /* Blank */, write_XLSCell(R, C, os));
@@ -182,9 +482,11 @@ function write_ws_biff8_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:n
 	if(cell.bf) write_biff_rec(ba, 0x0006 /* Formula */, write_Formula(cell, R, C, opts, os));
 	else switch(cell.t) {
 		case 'd': case 'n':
-			var v = cell.t == 'd' ? datenum(parseDate(cell.v)) : cell.v;
+			var v = cell.t == 'd' ? datenum(parseDate(cell.v, date1904), date1904) : cell.v;
+			if(isNaN(v)) write_biff_rec(ba, 0x0205 /* BoolErr */, write_BoolErr(R, C, 0x24, os, opts, "e")); // #NUM!
+			else if(!isFinite(v)) write_biff_rec(ba, 0x0205 /* BoolErr */, write_BoolErr(R, C, 0x07, os, opts, "e")); // #DIV/0!
 			/* TODO: emit RK as appropriate */
-			write_biff_rec(ba, 0x0203 /* Number */, write_Number(R, C, v, os, opts));
+			else write_biff_rec(ba, 0x0203 /* Number */, write_Number(R, C, v, os, opts));
 			break;
 		case 'b': case 'e':
 			write_biff_rec(ba, 0x0205 /* BoolErr */, write_BoolErr(R, C, cell.v, os, opts, cell.t));
@@ -207,7 +509,7 @@ function write_ws_biff8(idx/*:number*/, opts, wb/*:Workbook*/) {
 	var s = wb.SheetNames[idx], ws = wb.Sheets[s] || {};
 	var _WB/*:WBWBProps*/ = ((wb||{}).Workbook||{}/*:any*/);
 	var _sheet/*:WBWSProp*/ = ((_WB.Sheets||[])[idx]||{}/*:any*/);
-	var dense = Array.isArray(ws);
+	var dense = ws["!data"] != null;
 	var b8 = opts.biff == 8;
 	var ref/*:string*/, rr = "", cols/*:Array<string>*/ = [];
 	var range = safe_decode_range(ws['!ref'] || "A1");
@@ -241,24 +543,27 @@ function write_ws_biff8(idx/*:number*/, opts, wb/*:Workbook*/) {
 	write_biff_rec(ba, 0x0200 /* Dimensions */, write_Dimensions(range, opts));
 	/* ... */
 
+	var date1904 = (((wb||{}).Workbook||{}).WBProps||{}).date1904;
 	if(b8) ws['!links'] = [];
+	for(var C = range.s.c; C <= range.e.c; ++C) cols[C] = encode_col(C);
 	var comments = [];
+	var row = [];
 	for(var R = range.s.r; R <= range.e.r; ++R) {
+		if(dense) row = ws["!data"][R] || [];
 		rr = encode_row(R);
-		for(var C = range.s.c; C <= range.e.c; ++C) {
-			if(R === range.s.r) cols[C] = encode_col(C);
+		for(C = range.s.c; C <= range.e.c; ++C) {
 			ref = cols[C] + rr;
-			var cell = dense ? (ws[R]||[])[C] : ws[ref];
+			var cell = dense ? row[C] : ws[ref];
 			if(!cell) continue;
 			/* write cell */
-			write_ws_biff8_cell(ba, cell, R, C, opts);
+			write_ws_biff8_cell(ba, cell, R, C, opts, date1904);
 			if(b8 && cell.l) ws['!links'].push([ref, cell.l]);
-			if(b8 && cell.c) comments.push([ref, cell.c]);
+			if(cell.c) comments.push([cell.c, R, C]);
 		}
 	}
 	var cname/*:string*/ = _sheet.CodeName || _sheet.name || s;
 	/* ... */
-	// if(b8) comments.forEach(function(comment) { write_biff_rec(ba, 0x001c /* Note */, write_NoteSh(comment)); });
+	if(b8) write_comments_biff8(ba, comments); else write_comments_biff2(ba, comments);
 	/* ... */
 	if(b8) write_biff_rec(ba, 0x023e /* Window2 */, write_Window2((_WB.Views||[])[0]));
 	/* ... */
@@ -328,8 +633,10 @@ function write_biff8_global(wb/*:Workbook*/, bufs, opts/*:WriteOpts*/) {
 	var C = buf_array();
 	/* METADATA [MTRSettings] [ForceFullCalculation] */
 	if(b8) write_biff_rec(C, 0x008C /* Country */, write_Country());
-	/* *SUPBOOK *LBL *RTD [RecalcId] *HFPicture *MSODRAWINGGROUP */
+	/* *SUPBOOK *LBL *RTD [RecalcId] *HFPicture */
 
+	/* BIFF8: MsoDrawingGroup [*Continue] */
+	if(b8 && b8ocnts.length) write_biff_rec(C, 0x00EB /* MsoDrawingGroup */, write_MsoDrawingGroup());
 	/* BIFF8: [SST *Continue] ExtSST */
 	if(b8 && opts.Strings) write_biff_continue(C, 0x00FC /* SST */, write_SST(opts.Strings, opts));
 
@@ -372,6 +679,7 @@ function write_biff8_buf(wb/*:Workbook*/, opts/*:WriteOpts*/) {
 		o.ssf = wb.SSF;
 	}
 
+	b8oid = 1; b8ocnts = [];
 	o.Strings = /*::((*/[]/*:: :any):SST)*/; o.Strings.Count = 0; o.Strings.Unique = 0;
 	fix_write_opts(o);
 

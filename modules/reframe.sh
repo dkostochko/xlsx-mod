@@ -2,12 +2,13 @@
 set -eo pipefail
 INF=${1:-test.numbers}
 OUTF=${2:-reframed.numbers}
+if [ -e "$OUTF" ]; then chmod a+w "$OUTF"; fi
 cp "$INF" "$OUTF"
 chmod a-w "$OUTF"
 sleep 0.1
 # open "$OUTF"
 unzip -l "$OUTF"
-base64 "$OUTF" | tr -d '\n' > xlsx.zahl.js
+(base64 "$OUTF" || base64 -i "$OUTF") | tr -d '\n' > xlsx.zahl.js
 sed -i.bak 's/^/var XLSX_ZAHL_PAYLOAD = "/g;s/$/";\n/g' xlsx.zahl.js
 cp xlsx.zahl.js xlsx.zahl.mjs
 cat >> xlsx.zahl.js <<EOF

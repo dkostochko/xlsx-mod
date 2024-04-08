@@ -1,9 +1,20 @@
 /* [MS-XLS] 2.5.19 */
-function parse_XLSCell(blob/*::, length*/)/*:Cell*/ {
+function parse_XLSCell(blob, length, opts)/*:Cell*/ {
 	var rw = blob.read_shift(2); // 0-indexed
 	var col = blob.read_shift(2);
-	var ixfe = blob.read_shift(2);
-	return ({r:rw, c:col, ixfe:ixfe}/*:any*/);
+	var ret = ({r:rw, c:col, ixfe:0}/*:any*/);
+	if(opts && opts.biff == 2 || length == 7) {
+		/* TODO: pass back flags */
+		var flags = blob.read_shift(1);
+		ret.ixfe = flags & 0x3F;
+		blob.l += 2;
+		/*
+		var ifntifmt = blob.read_shift(1);
+		var ifmt = ifntifmt & 0x3f, ifnt = ifntifmt >> 6;
+		var flags3 = blob.read_shift(1);
+		*/
+	} else ret.ixfe = blob.read_shift(2);
+	return ret;
 }
 function write_XLSCell(R/*:number*/, C/*:number*/, ixfe/*:?number*/, o) {
 	if(!o) o = new_buf(6);
@@ -111,25 +122,25 @@ function parse_FtCf(blob) {
 /* [MS-XLS] 2.5.140 - 2.5.154 and friends */
 function parse_FtSkip(blob) { blob.l += 2; blob.l += blob.read_shift(2); }
 var FtTab = {
-	/*::[*/0x00/*::]*/: parse_FtSkip,      /* FtEnd */
-	/*::[*/0x04/*::]*/: parse_FtSkip,      /* FtMacro */
-	/*::[*/0x05/*::]*/: parse_FtSkip,      /* FtButton */
-	/*::[*/0x06/*::]*/: parse_FtSkip,      /* FtGmo */
-	/*::[*/0x07/*::]*/: parse_FtCf,        /* FtCf */
-	/*::[*/0x08/*::]*/: parse_FtSkip,      /* FtPioGrbit */
-	/*::[*/0x09/*::]*/: parse_FtSkip,      /* FtPictFmla */
-	/*::[*/0x0A/*::]*/: parse_FtSkip,      /* FtCbls */
-	/*::[*/0x0B/*::]*/: parse_FtSkip,      /* FtRbo */
-	/*::[*/0x0C/*::]*/: parse_FtSkip,      /* FtSbs */
-	/*::[*/0x0D/*::]*/: parse_FtNts,       /* FtNts */
-	/*::[*/0x0E/*::]*/: parse_FtSkip,      /* FtSbsFmla */
-	/*::[*/0x0F/*::]*/: parse_FtSkip,      /* FtGboData */
-	/*::[*/0x10/*::]*/: parse_FtSkip,      /* FtEdoData */
-	/*::[*/0x11/*::]*/: parse_FtSkip,      /* FtRboData */
-	/*::[*/0x12/*::]*/: parse_FtSkip,      /* FtCblsData */
-	/*::[*/0x13/*::]*/: parse_FtSkip,      /* FtLbsData */
-	/*::[*/0x14/*::]*/: parse_FtSkip,      /* FtCblsFmla */
-	/*::[*/0x15/*::]*/: parse_FtCmo
+	0x00: parse_FtSkip,      /* FtEnd */
+	0x04: parse_FtSkip,      /* FtMacro */
+	0x05: parse_FtSkip,      /* FtButton */
+	0x06: parse_FtSkip,      /* FtGmo */
+	0x07: parse_FtCf,        /* FtCf */
+	0x08: parse_FtSkip,      /* FtPioGrbit */
+	0x09: parse_FtSkip,      /* FtPictFmla */
+	0x0A: parse_FtSkip,      /* FtCbls */
+	0x0B: parse_FtSkip,      /* FtRbo */
+	0x0C: parse_FtSkip,      /* FtSbs */
+	0x0D: parse_FtNts,       /* FtNts */
+	0x0E: parse_FtSkip,      /* FtSbsFmla */
+	0x0F: parse_FtSkip,      /* FtGboData */
+	0x10: parse_FtSkip,      /* FtEdoData */
+	0x11: parse_FtSkip,      /* FtRboData */
+	0x12: parse_FtSkip,      /* FtCblsData */
+	0x13: parse_FtSkip,      /* FtLbsData */
+	0x14: parse_FtSkip,      /* FtCblsFmla */
+	0x15: parse_FtCmo
 };
 function parse_FtArray(blob, length/*::, ot*/) {
 	var tgt = blob.l + length;
@@ -138,7 +149,7 @@ function parse_FtArray(blob, length/*::, ot*/) {
 		var ft = blob.read_shift(2);
 		blob.l-=2;
 		try {
-			fts.push(FtTab[ft](blob, tgt - blob.l));
+			fts[ft] = FtTab[ft](blob, tgt - blob.l);
 		} catch(e) { blob.l = tgt; return fts; }
 	}
 	if(blob.l != tgt) blob.l = tgt; //throw new Error("bad Object Ft-sequence");
@@ -228,6 +239,12 @@ function parse_WsBool(blob, length, opts) {
 
 /* [MS-XLS] 2.4.28 */
 function parse_BoundSheet8(blob, length, opts) {
+	var name = "";
+	if(opts.biff == 4) {
+		name = parse_ShortXLUnicodeString(blob, 0, opts);
+		if(name.length === 0) name = "Sheet1";
+		return { name:name };
+	}
 	var pos = blob.read_shift(4);
 	var hidden = blob.read_shift(1) & 0x03;
 	var dt = blob.read_shift(1);
@@ -237,7 +254,7 @@ function parse_BoundSheet8(blob, length, opts) {
 		case 2: dt = 'Chartsheet'; break;
 		case 6: dt = 'VBAModule'; break;
 	}
-	var name = parse_ShortXLUnicodeString(blob, 0, opts);
+	name = parse_ShortXLUnicodeString(blob, 0, opts);
 	if(name.length === 0) name = "Sheet1";
 	return { pos:pos, hs:hidden, dt:dt, name:name };
 }
@@ -408,8 +425,8 @@ function write_Font(data, opts) {
 }
 
 /* [MS-XLS] 2.4.149 */
-function parse_LabelSst(blob) {
-	var cell = parse_XLSCell(blob);
+function parse_LabelSst(blob, length, opts) {
+	var cell = parse_XLSCell(blob, length, opts);
 	cell.isst = blob.read_shift(4);
 	return cell;
 }
@@ -424,8 +441,7 @@ function write_LabelSst(R/*:number*/, C/*:number*/, v/*:number*/, os/*:number*/ 
 function parse_Label(blob, length, opts) {
 	if(opts.biffguess && opts.biff == 2) opts.biff = 5;
 	var target = blob.l + length;
-	var cell = parse_XLSCell(blob, 6);
-	if(opts.biff == 2) blob.l++;
+	var cell = parse_XLSCell(blob, length, opts);
 	var str = parse_XLUnicodeString(blob, target - blob.l, opts);
 	cell.val = str;
 	return cell;
@@ -459,6 +475,19 @@ function write_Format(i/*:number*/, f/*:string*/, opts, o) {
 	return out;
 }
 var parse_BIFF2Format = parse_XLUnicodeString2;
+function write_BIFF2Format(f/*:string*/) {
+	var o = new_buf(1 + f.length);
+	o.write_shift(1, f.length);
+	o.write_shift(f.length, f, "sbcs");
+	return o;
+}
+function write_BIFF4Format(f/*:string*/) {
+	var o = new_buf(3 + f.length);
+	o.l += 2;
+	o.write_shift(1, f.length);
+	o.write_shift(f.length, f, "sbcs");
+	return o;
+}
 
 /* [MS-XLS] 2.4.90 */
 function parse_Dimensions(blob, length, opts) {
@@ -582,6 +611,44 @@ function write_XF(data, ixfeP, opts, o) {
 	o.write_shift(2, 0);
 	return o;
 }
+function parse_BIFF2XF(blob/*::, length, opts*/) {
+	var o = {};
+	o.ifnt = blob.read_shift(1); blob.l++; o.flags = blob.read_shift(1);
+	o.numFmtId = o.flags & 0x3F; o.flags>>=6;
+	o.fStyle = 0;
+	o.data = {}; // TODO
+	return o;
+}
+function write_BIFF2XF(xf) {
+	var o = new_buf(4);
+	o.l+=2;
+	o.write_shift(1, xf.numFmtId);
+	o.l++;
+	return o;
+}
+function write_BIFF3XF(xf) {
+	var o = new_buf(12);
+	o.l++;
+	o.write_shift(1, xf.numFmtId);
+	o.l += 10;
+	return o;
+}
+/* TODO: check other fields */
+var write_BIFF4XF = write_BIFF3XF;
+function parse_BIFF3XF(blob/*::, length, opts*/) {
+	var o = {};
+	o.ifnt = blob.read_shift(1); o.numFmtId = blob.read_shift(1); o.flags = blob.read_shift(2);
+	o.fStyle = (o.flags >> 2) & 0x01;
+	o.data = {}; // TODO
+	return o;
+}
+function parse_BIFF4XF(blob/*::, length, opts*/) {
+	var o = {};
+	o.ifnt = blob.read_shift(1); o.numFmtId = blob.read_shift(1); o.flags = blob.read_shift(2);
+	o.fStyle = (o.flags >> 2) & 0x01;
+	o.data = {}; // TODO
+	return o;
+}
 
 /* [MS-XLS] 2.4.134 */
 function parse_Guts(blob) {
@@ -602,8 +669,7 @@ function write_Guts(guts/*:Array<number>*/) {
 
 /* [MS-XLS] 2.4.24 */
 function parse_BoolErr(blob, length, opts) {
-	var cell = parse_XLSCell(blob, 6);
-	if(opts.biff == 2 || length == 9) ++blob.l;
+	var cell = parse_XLSCell(blob, 6, opts);
 	var val = parse_Bes(blob, 2);
 	cell.val = val;
 	cell.t = (val === true || val === false) ? 'b' : 'e';
@@ -619,7 +685,7 @@ function write_BoolErr(R/*:number*/, C/*:number*/, v, os/*:number*/, opts, t/*:s
 /* [MS-XLS] 2.4.180 Number */
 function parse_Number(blob, length, opts) {
 	if(opts.biffguess && opts.biff == 2) opts.biff = 5;
-	var cell = parse_XLSCell(blob, 6);
+	var cell = parse_XLSCell(blob, 6, opts);
 	var xnum = parse_Xnum(blob, 8);
 	cell.val = xnum;
 	return cell;
@@ -696,9 +762,11 @@ function parse_Lbl(blob, length, opts) {
 	};
 }
 
-/* [MS-XLS] 2.4.106 TODO: verify filename encoding */
+/* [MS-XLS] 2.4.106 TODO: legacy record filename encoding */
 function parse_ExternSheet(blob, length, opts) {
 	if(opts.biff < 8) return parse_BIFF5ExternSheet(blob, length, opts);
+	/* see issue 2907 */
+	if(!(opts.biff > 8) && (length == blob[blob.l] + (blob[blob.l+1] == 0x03 ? 1 : 0) + 1)) return parse_BIFF5ExternSheet(blob, length, opts);
 	var o = [], target = blob.l + length, len = blob.read_shift(opts.biff > 8 ? 4 : 2);
 	while(len-- !== 0) o.push(parse_XTI(blob, opts.biff > 8 ? 12 : 6, opts));
 		// [iSupBook, itabFirst, itabLast];
@@ -750,20 +818,33 @@ function parse_MTRSettings(blob) {
 	return [fMTREnabled, fUserSetThreadCount, cUserThreadCount];
 }
 
-/* [MS-XLS] 2.5.186 TODO: BIFF5 */
+/* [MS-XLS] 2.5.186 */
 function parse_NoteSh(blob, length, opts) {
-	if(opts.biff < 8) return;
 	var row = blob.read_shift(2), col = blob.read_shift(2);
 	var flags = blob.read_shift(2), idObj = blob.read_shift(2);
 	var stAuthor = parse_XLUnicodeString2(blob, 0, opts);
-	if(opts.biff < 8) blob.read_shift(1);
 	return [{r:row,c:col}, stAuthor, idObj, flags];
 }
 
 /* [MS-XLS] 2.4.179 */
 function parse_Note(blob, length, opts) {
+	if(opts && (opts.biff < 8)) {
+		var row = blob.read_shift(2), col = blob.read_shift(2);
+		if(row == 0xFFFF || row == -1) return; // TODO: test continuation
+		var cch = blob.read_shift(2);
+		var cmnt = blob.read_shift(Math.min(cch,2048), 'cpstr');
+		return [{r:row, c:col}, cmnt];
+	}
 	/* TODO: Support revisions */
 	return parse_NoteSh(blob, length, opts);
+}
+function write_NOTE_BIFF2(text/*:string*/, R/*:number*/, C/*:number*/, len/*?:number*/) {
+	var o = new_buf(6 + (len || text.length));
+	o.write_shift(2, R);
+	o.write_shift(2, C);
+	o.write_shift(2, len || text.length);
+	o.write_shift(text.length, text, "sbcs");
+	return o;
 }
 
 /* [MS-XLS] 2.4.168 */
@@ -1014,43 +1095,50 @@ function parse_ImData(blob) {
 	return o;
 }
 
+function write_BIFF2Cell(out, r/*:number*/, c/*:number*/, ixfe/*:number*/, ifmt/*:number*/) {
+	if(!out) out = new_buf(7);
+	out.write_shift(2, r);
+	out.write_shift(2, c);
+	out.write_shift(1, ixfe||0/* & 0x3F */);
+	out.write_shift(1, ifmt||0/* & 0x3F */);
+	out.write_shift(1, 0);
+	return out;
+}
+
 /* BIFF2_??? where ??? is the name from [XLS] */
 function parse_BIFF2STR(blob, length, opts) {
 	if(opts.biffguess && opts.biff == 5) opts.biff = 2;
-	var cell = parse_XLSCell(blob, 6);
-	++blob.l;
+	var cell = parse_XLSCell(blob, 7, opts);
 	var str = parse_XLUnicodeString2(blob, length-7, opts);
 	cell.t = 'str';
 	cell.val = str;
 	return cell;
 }
 
-function parse_BIFF2NUM(blob/*::, length*/) {
-	var cell = parse_XLSCell(blob, 6);
-	++blob.l;
+function parse_BIFF2NUM(blob, length, opts) {
+	var cell = parse_XLSCell(blob, 7, opts);
 	var num = parse_Xnum(blob, 8);
 	cell.t = 'n';
 	cell.val = num;
 	return cell;
 }
-function write_BIFF2NUM(r/*:number*/, c/*:number*/, val/*:number*/) {
+function write_BIFF2NUM(r/*:number*/, c/*:number*/, val/*:number*/, ixfe, ifmt) {
 	var out = new_buf(15);
-	write_BIFF2Cell(out, r, c);
+	write_BIFF2Cell(out, r, c, ixfe||0, ifmt||0);
 	out.write_shift(8, val, 'f');
 	return out;
 }
 
-function parse_BIFF2INT(blob) {
-	var cell = parse_XLSCell(blob, 6);
-	++blob.l;
+function parse_BIFF2INT(blob, length, opts) {
+	var cell = parse_XLSCell(blob, 7, opts);
 	var num = blob.read_shift(2);
 	cell.t = 'n';
 	cell.val = num;
 	return cell;
 }
-function write_BIFF2INT(r/*:number*/, c/*:number*/, val/*:number*/) {
+function write_BIFF2INT(r/*:number*/, c/*:number*/, val/*:number*/, ixfe/*:number*/, ifmt/*:number*/) {
 	var out = new_buf(9);
-	write_BIFF2Cell(out, r, c);
+	write_BIFF2Cell(out, r, c, ixfe||0, ifmt||0);
 	out.write_shift(2, val);
 	return out;
 }
@@ -1059,6 +1147,16 @@ function parse_BIFF2STRING(blob) {
 	var cch = blob.read_shift(1);
 	if(cch === 0) { blob.l++; return ""; }
 	return blob.read_shift(cch, 'sbcs-cont');
+}
+
+function parse_BIFF2BOOLERR(blob, length, opts) {
+	var bestart = blob.l + 7;
+	var cell = parse_XLSCell(blob, 6, opts);
+	blob.l = bestart;
+	var val = parse_Bes(blob, 2);
+	cell.val = val;
+	cell.t = (val === true || val === false) ? 'b' : 'e';
+	return cell;
 }
 
 /* TODO: convert to BIFF8 font struct */
@@ -1074,11 +1172,18 @@ function parse_BIFF2FONTXTRA(blob, length) {
 /* TODO: parse rich text runs */
 function parse_RString(blob, length, opts) {
 	var end = blob.l + length;
-	var cell = parse_XLSCell(blob, 6);
+	var cell = parse_XLSCell(blob, 6, opts);
 	var cch = blob.read_shift(2);
 	var str = parse_XLUnicodeStringNoCch(blob, cch, opts);
 	blob.l = end;
 	cell.t = 'str';
 	cell.val = str;
 	return cell;
+}
+
+function parse_BIFF4SheetInfo(blob/*::, length, opts*/) {
+	var flags = blob.read_shift(4);
+	var cch = blob.read_shift(1), name = blob.read_shift(cch, "sbcs");
+	if(name.length === 0) name = "Sheet1";
+	return { flags: flags, name:name };
 }

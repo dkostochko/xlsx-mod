@@ -71,12 +71,12 @@ function parse_ext_props(data, p, opts) {
 	data = utf8read(data);
 
 	EXT_PROPS.forEach(function(f) {
-		var xml = (data.match(matchtag(f[0]))||[])[1];
+		var xml = (str_match_xml_ns(data, f[0])||[])[1];
 		switch(f[2]) {
 			case "string": if(xml) p[f[1]] = unescapexml(xml); break;
 			case "bool": p[f[1]] = xml === "true"; break;
 			case "raw":
-				var cur = data.match(new RegExp("<" + f[0] + "[^>]*>([\\s\\S]*?)<\/" + f[0] + ">"));
+				var cur = str_match_xml(data, f[0]);
 				if(cur && cur.length > 0) q[f[1]] = cur[1];
 				break;
 		}

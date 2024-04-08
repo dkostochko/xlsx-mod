@@ -31,6 +31,6 @@ function ods_to_csf_3D(r/*:string*/)/*:[string, string]*/ {
 }
 
 function csf_to_ods_3D(r/*:string*/)/*:string*/ {
-	return r.replace(/!/,".");
+	return r.replace(/!/,".").replace(/:/, ":.");
 }
 

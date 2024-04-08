@@ -69,8 +69,14 @@ function parse_BrtName(data, length, opts) {
 	data.l += 1; //var chKey = data.read_shift(1);
 	var itab = data.read_shift(4);
 	var name = parse_XLNameWideString(data);
-	var formula = parse_XLSBNameParsedFormula(data, 0, opts);
-	var comment = parse_XLNullableWideString(data);
+	var formula;
+	var comment = "";
+	try {
+		formula = parse_XLSBNameParsedFormula(data, 0, opts);
+		try {
+			comment = parse_XLNullableWideString(data);
+		} catch(e){}
+	} catch(e) { console.error("Could not parse defined name " + name); }
 	if(flags & 0x20) name = "_xlnm." + name;
 	//if(0 /* fProc */) {
 		// unusedstring1: XLNullableWideString
@@ -141,7 +147,7 @@ function parse_wb_bin(data, opts)/*:WorkbookFile*/ {
 
 			case 0x0027: /* 'BrtName' */
 				if(val.Sheet != null) opts.SID = val.Sheet;
-				val.Ref = stringify_formula(val.Ptg, null, null, supbooks, opts);
+				val.Ref = val.Ptg ? stringify_formula(val.Ptg, null, null, supbooks, opts) : "#REF!";
 				delete opts.SID;
 				delete val.Ptg;
 				Names.push(val);
