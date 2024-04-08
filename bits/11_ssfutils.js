@@ -43,6 +43,7 @@ var dateNFregex = /[dD]+|[mM]+|[yYeE]+|[Hh]+|[Ss]+/g;
 function dateNF_regex(dateNF/*:string|number*/)/*:RegExp*/ {
 	var fmt = typeof dateNF == "number" ? table_fmt[dateNF] : dateNF;
 	fmt = fmt.replace(dateNFregex, "(\\d+)");
+	dateNFregex.lastIndex = 0;
 	return new RegExp("^" + fmt + "$");
 }
 function dateNF_fix(str/*:string*/, dateNF/*:string*/, match/*:Array<string>*/)/*:string*/ {
@@ -55,6 +56,7 @@ function dateNF_fix(str/*:string*/, dateNF/*:string*/, match/*:Array<string>*/)/
 			case 'm': if(H >= 0) M = v; else m = v; break;
 		}
 	});
+	dateNFregex.lastIndex = 0;
 	if(S >= 0 && M == -1 && m >= 0) { M = m; m = -1; }
 	var datestr = (("" + (Y>=0?Y: new Date().getFullYear())).slice(-4) + "-" + ("00" + (m>=1?m:1)).slice(-2) + "-" + ("00" + (d>=1?d:1)).slice(-2));
 	if(datestr.length == 7) datestr = "0" + datestr;

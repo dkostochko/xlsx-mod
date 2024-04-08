@@ -61,7 +61,7 @@ function write_BrtBeginEsmdb(cnt: number, cm: boolean): RawData {
 }
 
 /* [MS-XLSB] 2.1.7.34 Metadata */
-function parse_xlmeta_bin(data, name: string, _opts?: ParseXLMetaOptions): XLMeta {
+function parse_xlmeta_bin(data: RawData, name: string, _opts?: ParseXLMetaOptions): XLMeta {
 	var out: XLMeta = { Types: [], Cell: [], Value: [] };
 	var opts = _opts || {};
 	var state: number[] = [];

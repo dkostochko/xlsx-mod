@@ -161,16 +161,6 @@ var utf8write/*:StringConv*/ = has_buf ? function(data) { return Buffer_from(dat
 	return out.join("");
 };
 
-// matches <foo>...</foo> extracts content
-var matchtag = /*#__PURE__*/(function() {
-	var mtcache/*:{[k:string]:RegExp}*/ = ({}/*:any*/);
-	return function matchtag(f/*:string*/,g/*:?string*/)/*:RegExp*/ {
-		var t = f+"|"+(g||"");
-		if(mtcache[t]) return mtcache[t];
-		return (mtcache[t] = new RegExp('<(?:\\w+:)?'+f+'(?: xml:space="preserve")?(?:[^>]*)>([\\s\\S]*?)</(?:\\w+:)?'+f+'>',((g||"")/*:any*/)));
-	};
-})();
-
 var htmldecode/*:{(s:string):string}*/ = /*#__PURE__*/(function() {
 	var entities/*:Array<[RegExp, string]>*/ = [
 		['nbsp', ' '], ['middot', '·'],
@@ -195,16 +185,11 @@ var htmldecode/*:{(s:string):string}*/ = /*#__PURE__*/(function() {
 	};
 })();
 
-var vtregex = /*#__PURE__*/(function(){ var vt_cache = {};
-	return function vt_regex(bt) {
-		if(vt_cache[bt] !== undefined) return vt_cache[bt];
-		return (vt_cache[bt] = new RegExp("<(?:vt:)?" + bt + ">([\\s\\S]*?)</(?:vt:)?" + bt + ">", 'g') );
-};})();
 var vtvregex = /<\/?(?:vt:)?variant>/g, vtmregex = /<(?:vt:)([^>]*)>([\s\S]*)</;
 function parseVector(data/*:string*/, opts)/*:Array<{v:string,t:string}>*/ {
 	var h = parsexmltag(data);
 
-	var matches/*:Array<string>*/ = data.match(vtregex(h.baseType))||[];
+	var matches/*:Array<string>*/ = str_match_xml_ns_g(data, h.baseType)||[];
 	var res/*:Array<any>*/ = [];
 	if(matches.length != h.size) {
 		if(opts.WTF) throw new Error("unexpected vector length " + matches.length + " != " + h.size);

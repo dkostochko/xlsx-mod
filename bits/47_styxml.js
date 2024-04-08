@@ -311,7 +311,7 @@ function parse_cellXfs(t, styles, opts) {
 			case '<cellXfs': case '<cellXfs>': case '<cellXfs/>': case '</cellXfs>': break;
 
 			/* 18.8.45 xf CT_Xf */
-			case '<xf': case '<xf/>':
+			case '<xf': case '<xf/>': case '<xf>':
 				xf = y;
 				delete xf[0];
 				for(i = 0; i < cellXF_uint.length; ++i) if(xf[cellXF_uint[i]])
@@ -325,7 +325,7 @@ function parse_cellXfs(t, styles, opts) {
 			case '</xf>': break;
 
 			/* 18.8.1 alignment CT_CellAlignment */
-			case '<alignment': case '<alignment/>':
+			case '<alignment': case '<alignment/>': case '<alignment>':
 				var alignment = {};
 				if(y.vertical) alignment.vertical = y.vertical;
 				if(y.horizontal) alignment.horizontal = y.horizontal;
@@ -337,12 +337,12 @@ function parse_cellXfs(t, styles, opts) {
 			case '</alignment>': break;
 
 			/* 18.8.33 protection CT_CellProtection */
-			case '<protection':
+			case '<protection': case '<protection>':
 				break;
 			case '</protection>': case '<protection/>': break;
 
 			/* note: sometimes mc:AlternateContent appears bare */
-			case '<AlternateContent': pass = true; break;
+			case '<AlternateContent': case '<AlternateContent>': pass = true; break;
 			case '</AlternateContent>': pass = false; break;
 
 			/* 18.2.10 extLst CT_ExtensionList ? */
@@ -379,7 +379,7 @@ var bordersRegex = /<(?:\w+:)?borders([^>]*)>[\S\s]*?<\/(?:\w+:)?borders>/;
 return function parse_sty_xml(data, themes, opts) {
 	var styles = {};
 	if(!data) return styles;
-	data = data.replace(/<!--([\s\S]*?)-->/mg,"").replace(/<!DOCTYPE[^\[]*\[[^\]]*\]>/gm,"");
+	data = str_remove_ng(data, "<!--", "-->").replace(/<!DOCTYPE[^\[]*\[[^\]]*\]>/gm,"");
 	/* 18.8.39 styleSheet CT_Stylesheet */
 	var t;
 

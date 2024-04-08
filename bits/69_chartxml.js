@@ -34,7 +34,10 @@ function parse_chart(data/*:?string*/, name/*:string*/, opts, rels, wb, csheet) 
 		refguess.e.c = C;
 		col = encode_col(C);
 		cache[0].forEach(function(n,i) {
-			cs[col + encode_row(i)] = {t:'n', v:n, z:cache[1] };
+			if(cs["!data"]) {
+				if(!cs["!data"][i]) cs["!data"][i] = [];
+				cs["!data"][i][C] = {t:'n', v:n, z:cache[1] };
+			} else cs[col + encode_row(i)] = {t:'n', v:n, z:cache[1] };
 			R = i;
 		});
 		if(refguess.e.r < R) refguess.e.r = R;

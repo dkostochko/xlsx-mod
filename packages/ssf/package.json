@@ -1,6 +1,6 @@
 {
 	"name": "ssf",
-	"version": "0.11.2",
+	"version": "0.11.3",
 	"author": "sheetjs",
 	"description": "Format data using ECMA-376 spreadsheet Format Codes",
 	"keywords": [
@@ -17,13 +17,14 @@
 		"@sheetjs/uglify-js":"~2.7.3",
 		"@types/node":"^8.0.7",
 		"blanket": "~1.2.3",
-		"dtslint": "^0.1.2",
+		"dtslint": "^0.9.9",
 		"mocha": "~2.5.3",
-		"typescript": "2.2.0"
+		"typescript": "2.2.0",
+		"xlsx": "https://cdn.sheetjs.com/xlsx-0.20.0/xlsx-0.20.0.tgz"
 	},
 	"repository": {
 		"type": "git",
-		"url": "git://github.com/SheetJS/sheetjs.git",
+		"url": "https://git.sheetjs.com/SheetJS/sheetjs",
 		"directory": "packages/ssf"
 	},
 	"scripts": {
@@ -48,9 +49,9 @@
 			"holes"
 		]
 	},
-	"homepage": "http://sheetjs.com/",
+	"homepage": "https://sheetjs.com/",
 	"bugs": {
-		"url": "https://github.com/SheetJS/sheetjs/issues"
+		"url": "https://git.sheetjs.com/SheetJS/sheetjs/issues"
 	},
 	"license": "Apache-2.0",
 	"engines": {

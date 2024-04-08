@@ -13,7 +13,7 @@ function parse_drawing(data, rels/*:any*/) {
 	   the actual type is based on the URI of the graphicData
 		TODO: handle embedded charts and other types of graphics
 	*/
-	var id = (data.match(/<c:chart [^>]*r:id="([^"]*)"/)||["",""])[1];
+	var id = (data.match(/<c:chart [^<>]*r:id="([^<>"]*)"/)||["",""])[1];
 
 	return rels['!id'][id].Target;
 }

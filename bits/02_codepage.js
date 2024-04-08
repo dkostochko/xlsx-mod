@@ -6,26 +6,26 @@ var $cptable;
 var VALID_ANSI = [ 874, 932, 936, 949, 950, 1250, 1251, 1252, 1253, 1254, 1255, 1256, 1257, 1258, 10000 ];
 /* ECMA-376 Part I 18.4.1 charset to codepage mapping */
 var CS2CP = ({
-	/*::[*/0/*::]*/:    1252, /* ANSI */
-	/*::[*/1/*::]*/:   65001, /* DEFAULT */
-	/*::[*/2/*::]*/:   65001, /* SYMBOL */
-	/*::[*/77/*::]*/:  10000, /* MAC */
-	/*::[*/128/*::]*/:   932, /* SHIFTJIS */
-	/*::[*/129/*::]*/:   949, /* HANGUL */
-	/*::[*/130/*::]*/:  1361, /* JOHAB */
-	/*::[*/134/*::]*/:   936, /* GB2312 */
-	/*::[*/136/*::]*/:   950, /* CHINESEBIG5 */
-	/*::[*/161/*::]*/:  1253, /* GREEK */
-	/*::[*/162/*::]*/:  1254, /* TURKISH */
-	/*::[*/163/*::]*/:  1258, /* VIETNAMESE */
-	/*::[*/177/*::]*/:  1255, /* HEBREW */
-	/*::[*/178/*::]*/:  1256, /* ARABIC */
-	/*::[*/186/*::]*/:  1257, /* BALTIC */
-	/*::[*/204/*::]*/:  1251, /* RUSSIAN */
-	/*::[*/222/*::]*/:   874, /* THAI */
-	/*::[*/238/*::]*/:  1250, /* EASTEUROPE */
-	/*::[*/255/*::]*/:  1252, /* OEM */
-	/*::[*/69/*::]*/:   6969  /* MISC */
+	0:    1252, /* ANSI */
+	1:   65001, /* DEFAULT */
+	2:   65001, /* SYMBOL */
+	77:  10000, /* MAC */
+	128:   932, /* SHIFTJIS */
+	129:   949, /* HANGUL */
+	130:  1361, /* JOHAB */
+	134:   936, /* GB2312 */
+	136:   950, /* CHINESEBIG5 */
+	161:  1253, /* GREEK */
+	162:  1254, /* TURKISH */
+	163:  1258, /* VIETNAMESE */
+	177:  1255, /* HEBREW */
+	178:  1256, /* ARABIC */
+	186:  1257, /* BALTIC */
+	204:  1251, /* RUSSIAN */
+	222:   874, /* THAI */
+	238:  1250, /* EASTEUROPE */
+	255:  1252, /* OEM */
+	69:   6969  /* MISC */
 }/*:any*/);
 
 var set_ansi = function(cp/*:number*/) { if(VALID_ANSI.indexOf(cp) == -1) return; current_ansi = CS2CP[0] = cp; };
@@ -39,6 +39,11 @@ function char_codes(data/*:string*/)/*:Array<number>*/ { var o/*:Array<number>*/
 function utf16leread(data/*:string*/)/*:string*/ {
 	var o/*:Array<string>*/ = [];
 	for(var i = 0; i < (data.length>>1); ++i) o[i] = String.fromCharCode(data.charCodeAt(2*i) + (data.charCodeAt(2*i+1)<<8));
+	return o.join("");
+}
+function utf16lereadu(data/*:Uint8Array*/)/*:string*/ {
+	var o/*:Array<string>*/ = [];
+	for(var i = 0; i < (data.length>>1); ++i) o[i] = String.fromCharCode(data[2*i] + (data[2*i+1]<<8));
 	return o.join("");
 }
 function utf16beread(data/*:string*/)/*:string*/ {
