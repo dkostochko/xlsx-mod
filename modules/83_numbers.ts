@@ -3,33 +3,36 @@
 
 /* these are type imports and do not show up in the generated JS */
 import { CFB$Container, CFB$Entry } from 'cfb';
-import { WorkBook, WorkSheet, Range, CellObject, ParsingOptions, WritingOptions } from '../';
-import type { utils } from "../";
+import { WorkBook, WorkSheet, Range, CellObject, ParsingOptions, WritingOptions, DenseWorkSheet, Comments } from '../';
+import type { utils, NumberFormat } from "../";
 
-declare var encode_cell: typeof utils.encode_cell;
+declare var encode_col: typeof utils.encode_col;
+declare var encode_row: typeof utils.encode_row;
 declare var encode_range: typeof utils.encode_range;
 declare var book_new: typeof utils.book_new;
 declare var book_append_sheet: typeof utils.book_append_sheet;
-declare var sheet_to_json: typeof utils.sheet_to_json;
 declare var decode_range: typeof utils.decode_range;
+declare var numdate: (num: number) => Date;
+declare var table_fmt: {[nf: number]: string};
+declare function fmt_is_date(fmt: NumberFormat): boolean;
 import * as _CFB from 'cfb';
 declare var CFB: typeof _CFB;
 //<<import { utils } from "../../";
-//<<const { encode_cell, encode_range, book_new, book_append_sheet } = utils;
+//<<const { encode_col, encode_row, encode_range, book_new, book_append_sheet } = utils;
 
 /* see https://bugs.webkit.org/show_bug.cgi?id=243148 -- affects iOS Safari */
 declare var Buffer: any; // Buffer is typeof-guarded but TS still needs this :(
 var subarray: "subarray" | "slice" = (() => {
 	try {
-	if(typeof Uint8Array == "undefined") return "slice";
-	if(typeof Uint8Array.prototype.subarray == "undefined") return "slice";
-	// NOTE: feature tests are for node < 6.x
-	if(typeof Buffer !== "undefined") {
-		if(typeof Buffer.prototype.subarray == "undefined") return "slice";
-		if((typeof Buffer.from == "function" ? Buffer.from([72,62]) : new Buffer([72,62])) instanceof Uint8Array) return "subarray";
-		return "slice";
-	}
-	return "subarray";
+		if(typeof Uint8Array == "undefined") return "slice";
+		if(typeof Uint8Array.prototype.subarray == "undefined") return "slice";
+		// NOTE: feature tests are for node < 6.x
+		if(typeof Buffer !== "undefined") {
+			if(typeof Buffer.prototype.subarray == "undefined") return "slice";
+			if((typeof Buffer.from == "function" ? Buffer.from([72,62]) : new Buffer([72,62])) instanceof Uint8Array) return "subarray";
+			return "slice";
+		}
+		return "subarray";
 	} catch(e) { return "slice"; }
 })();
 
@@ -40,23 +43,17 @@ function u8str(u8: Uint8Array): string { return /* Buffer.isBuffer(u8) ? u8.toSt
 function stru8(str: string): Uint8Array { return typeof TextEncoder != "undefined" ? new TextEncoder().encode(str) : s2a(utf8write(str)) as Uint8Array; }
 //<<export { u8str, stru8 };
 
-function u8contains(body: Uint8Array, search: Uint8Array): boolean {
-	var L = body.indexOf(search[0]);
-	if(L == -1) return false;
-	outer: for(; L <= body.length - search.length; ++L) {
-		for(var j = 0; j < search.length; ++j) if(body[L+j] != search[j]) continue outer;
-		return true;
-	}
-	return false;
-}
-//<<export { u8contains }
-
 /** Concatenate Uint8Arrays */
 function u8concat(u8a: Uint8Array[]): Uint8Array {
-	var len = u8a.reduce((acc: number, x: Uint8Array) => acc + x.length, 0);
+	var len = 0;
+	for(var i = 0; i < u8a.length; ++i) len += u8a[i].length;
 	var out = new Uint8Array(len);
 	var off = 0;
-	u8a.forEach(u8 => { out.set(u8, off); off += u8.length; });
+	for(i = 0; i < u8a.length; ++i) {
+		var u8 = u8a[i], L = u8.length;
+		if(L < 250) { for(var j = 0; j < L; ++j) out[off++] = u8[j]; }
+		else { out.set(u8, off); off += L; }
+	}
 	return out;
 }
 //<<export { u8concat };
@@ -87,11 +84,11 @@ function writeDecimal128LE(buf: Uint8Array, offset: number, value: number): void
 }
 
 
-type Ptr = [number];
+interface Ptr { l: number; }
 
 /** Parse an integer from the varint that can be exactly stored in a double */
-function parse_varint49(buf: Uint8Array, ptr?: Ptr): number {
-	var l = ptr ? ptr[0] : 0;
+function parse_varint49(buf: Uint8Array, ptr: Ptr): number {
+	var l = ptr.l;
 	var usz = buf[l] & 0x7F;
 	varint: if(buf[l++] >= 0x80) {
 		usz |= (buf[l] & 0x7F) <<  7; if(buf[l++] < 0x80) break varint;
@@ -101,7 +98,7 @@ function parse_varint49(buf: Uint8Array, ptr?: Ptr): number {
 		usz += (buf[l] & 0x7F) * Math.pow(2, 35); ++l; if(buf[l++] < 0x80) break varint;
 		usz += (buf[l] & 0x7F) * Math.pow(2, 42); ++l; if(buf[l++] < 0x80) break varint;
 	}
-	if(ptr) ptr[0] = l;
+	ptr.l = l;
 	return usz;
 }
 /** Write a varint up to 7 bytes / 49 bits */
@@ -126,9 +123,9 @@ function write_varint49(v: number): Uint8Array {
 }
 /** Parse a repeated varint [packed = true] field */
 function parse_packed_varints(buf: Uint8Array): number[] {
-	var ptr: Ptr = [0];
+	var ptr: Ptr = {l: 0};
 	var out: number[] = [];
-	while(ptr[0] < buf.length) out.push(parse_varint49(buf, ptr));
+	while(ptr.l < buf.length) out.push(parse_varint49(buf, ptr));
 	return out;
 }
 /** Write a repeated varint [packed = true] field */
@@ -139,14 +136,12 @@ function write_packed_varints(nums: number[]): Uint8Array {
 
 /** Parse a 32-bit signed integer from the raw varint */
 function varint_to_i32(buf: Uint8Array): number {
-	var l = 0, i32 = buf[l] & 0x7F;
-	varint: if(buf[l++] >= 0x80) {
-		i32 |= (buf[l] & 0x7F) <<  7; if(buf[l++] < 0x80) break varint;
-		i32 |= (buf[l] & 0x7F) << 14; if(buf[l++] < 0x80) break varint;
-		i32 |= (buf[l] & 0x7F) << 21; if(buf[l++] < 0x80) break varint;
-		i32 |= (buf[l] & 0x7F) << 28;
-	}
-	return i32;
+	var l = 0,
+	i32  = (buf[l] & 0x7F)      ; if(buf[l++] < 0x80) return i32;
+	i32 |= (buf[l] & 0x7F) <<  7; if(buf[l++] < 0x80) return i32;
+	i32 |= (buf[l] & 0x7F) << 14; if(buf[l++] < 0x80) return i32;
+	i32 |= (buf[l] & 0x7F) << 21; if(buf[l++] < 0x80) return i32;
+	i32 |= (buf[l] & 0x0F) << 28;                     return i32;
 }
 /** Parse a 64-bit unsigned integer as a pair */
 function varint_to_u64(buf: Uint8Array): [number, number] {
@@ -170,34 +165,35 @@ interface ProtoItem {
 	data: Uint8Array;
 	type: number;
 }
-type ProtoField = Array<ProtoItem>
+type ProtoField = Array<ProtoItem>;
 type ProtoMessage = Array<ProtoField>;
 /** Shallow parse of a Protobuf message */
 function parse_shallow(buf: Uint8Array): ProtoMessage {
-	var out: ProtoMessage = [], ptr: Ptr = [0];
-	while(ptr[0] < buf.length) {
-		var off = ptr[0];
+	var out: ProtoMessage = [], ptr: Ptr = {l: 0};
+	while(ptr.l < buf.length) {
+		var off = ptr.l;
 		var num = parse_varint49(buf, ptr);
-		var type = num & 0x07; num = Math.floor(num / 8);
-		var len = 0;
-		var res: Uint8Array;
-		if(num == 0) break;
+		var type = num & 0x07; num = (num / 8)|0;
+		var data: Uint8Array;
+		var l = ptr.l;
 		switch(type) {
 			case 0: {
-				var l = ptr[0];
-				while(buf[ptr[0]++] >= 0x80);
-				res = buf[subarray](l, ptr[0]);
+				while(buf[l++] >= 0x80);
+				data = buf[subarray](ptr.l, l);
+				ptr.l = l;
 			} break;
-			case 5: len = 4; res = buf[subarray](ptr[0], ptr[0] + len); ptr[0] += len; break;
-			case 1: len = 8; res = buf[subarray](ptr[0], ptr[0] + len); ptr[0] += len; break;
-			case 2: len = parse_varint49(buf, ptr); res = buf[subarray](ptr[0], ptr[0] + len); ptr[0] += len; break;
-			case 3: // Start group
-			case 4: // End group
+			case 1: { data = buf[subarray](l, l + 8); ptr.l = l + 8; } break;
+			case 2: {
+				var len = parse_varint49(buf, ptr);
+				data = buf[subarray](ptr.l, ptr.l + len);
+				ptr.l += len;
+			} break;
+			case 5: { data = buf[subarray](l, l + 4); ptr.l = l + 4; } break;
 			default: throw new Error(`PB Type ${type} for Field ${num} at offset ${off}`);
 		}
-		var v: ProtoItem = { data: res, type };
-		if(out[num] == null) out[num] = [v];
-		else out[num].push(v);
+		var v: ProtoItem = { data, type };
+		if(out[num] == null) out[num] = [];
+		out[num].push(v);
 	}
 	return out;
 }
@@ -218,7 +214,7 @@ function write_shallow(proto: ProtoMessage): Uint8Array {
 //<<export { parse_shallow, write_shallow };
 
 /** Map over each entry in a repeated (or single-value) field */
-function mappa<U>(data: ProtoField, cb:(Uint8Array) => U): U[] {
+function mappa<U>(data: ProtoField, cb: (u: Uint8Array) => U): U[] {
 	return data?.map(d =>  cb(d.data)) || [];
 }
 
@@ -235,12 +231,12 @@ interface IWAArchiveInfo {
 }
 /** Extract all messages from a IWA file */
 function parse_iwa_file(buf: Uint8Array): IWAArchiveInfo[] {
-	var out: IWAArchiveInfo[] = [], ptr: Ptr = [0];
-	while(ptr[0] < buf.length) {
+	var out: IWAArchiveInfo[] = [], ptr: Ptr = {l: 0};
+	while(ptr.l < buf.length) {
 		/* .TSP.ArchiveInfo */
 		var len = parse_varint49(buf, ptr);
-		var ai = parse_shallow(buf[subarray](ptr[0], ptr[0] + len));
-		ptr[0] += len;
+		var ai = parse_shallow(buf[subarray](ptr.l, ptr.l + len));
+		ptr.l += len;
 
 		var res: IWAArchiveInfo = {
 			/* TODO: technically ID is optional */
@@ -252,9 +248,9 @@ function parse_iwa_file(buf: Uint8Array): IWAArchiveInfo[] {
 			var fl = varint_to_i32(mi[3][0].data);
 			res.messages.push({
 				meta: mi,
-				data: buf[subarray](ptr[0], ptr[0] + fl)
+				data: buf[subarray](ptr.l, ptr.l + fl)
 			});
-			ptr[0] += fl;
+			ptr.l += fl;
 		});
 		if(ai[3]?.[0]) res.merge = (varint_to_i32(ai[3][0].data) >>> 0) > 0;
 		out.push(res);
@@ -290,35 +286,36 @@ function write_iwa_file(ias: IWAArchiveInfo[]): Uint8Array {
 /** Decompress a snappy chunk */
 function parse_snappy_chunk(type: number, buf: Uint8Array): Uint8Array[] {
 	if(type != 0) throw new Error(`Unexpected Snappy chunk type ${type}`);
-	var ptr: Ptr = [0];
+	var ptr: Ptr = {l: 0};
 
 	var usz = parse_varint49(buf, ptr);
 	var chunks: Uint8Array[] = [];
-	while(ptr[0] < buf.length) {
-		var tag = buf[ptr[0]] & 0x3;
+	var l = ptr.l;
+	while(l < buf.length) {
+		var tag = buf[l] & 0x3;
 		if(tag == 0) {
-			var len = buf[ptr[0]++] >> 2;
+			var len = buf[l++] >> 2;
 			if(len < 60) ++len;
 			else {
 				var c = len - 59;
-				len = buf[ptr[0]];
-				if(c > 1) len |= (buf[ptr[0]+1]<<8);
-				if(c > 2) len |= (buf[ptr[0]+2]<<16);
-				if(c > 3) len |= (buf[ptr[0]+3]<<24);
+				len = buf[l];
+				if(c > 1) len |= (buf[l+1]<<8);
+				if(c > 2) len |= (buf[l+2]<<16);
+				if(c > 3) len |= (buf[l+3]<<24);
 				len >>>=0; len++;
-				ptr[0] += c;
+				l += c;
 			}
-			chunks.push(buf[subarray](ptr[0], ptr[0] + len)); ptr[0] += len; continue;
+			chunks.push(buf[subarray](l, l + len)); l += len; continue;
 		} else {
 			var offset = 0, length = 0;
 			if(tag == 1) {
-				length = ((buf[ptr[0]] >> 2) & 0x7) + 4;
-				offset = (buf[ptr[0]++] & 0xE0) << 3;
-				offset |= buf[ptr[0]++];
+				length = ((buf[l] >> 2) & 0x7) + 4;
+				offset = (buf[l++] & 0xE0) << 3;
+				offset |= buf[l++];
 			} else {
-				length = (buf[ptr[0]++] >> 2) + 1;
-				if(tag == 2) { offset = buf[ptr[0]] | (buf[ptr[0]+1]<<8); ptr[0] += 2; }
-				else { offset = (buf[ptr[0]] | (buf[ptr[0]+1]<<8) | (buf[ptr[0]+2]<<16) | (buf[ptr[0]+3]<<24))>>>0; ptr[0] += 4; }
+				length = (buf[l++] >> 2) + 1;
+				if(tag == 2) { offset = buf[l] | (buf[l+1]<<8); l += 2; }
+				else { offset = (buf[l] | (buf[l+1]<<8) | (buf[l+2]<<16) | (buf[l+3]<<24))>>>0; l += 4; }
 			}
 			if(offset == 0) throw new Error("Invalid offset 0");
 			var j = chunks.length - 1, off = offset;
@@ -334,14 +331,12 @@ function parse_snappy_chunk(type: number, buf: Uint8Array): Uint8Array[] {
 				while(length >= chunks[j].length) { chunks.push(chunks[j]); length -= chunks[j].length; ++j; }
 				if(length) chunks.push(chunks[j][subarray](0, length));
 			}
-			if(chunks.length > 100) chunks = [u8concat(chunks)];
+			if(chunks.length > 25) chunks = [u8concat(chunks)];
 		}
 	}
-	if(chunks.reduce((acc, u8) => acc + u8.length, 0) != usz) throw new Error(`Unexpected length: ${chunks.reduce((acc, u8) => acc + u8.length, 0)} != ${usz}`);
+	var clen = 0; for(var u8i = 0; u8i < chunks.length; ++u8i) clen += chunks[u8i].length;
+	if(clen != usz) throw new Error(`Unexpected length: ${clen} != ${usz}`);
 	return chunks;
-	//var o = u8concat(chunks);
-	//if(o.length != usz) throw new Error(`Unexpected length: ${o.length} != ${usz}`);
-	//return o;
 }
 
 /** Decompress IWA file */
@@ -356,7 +351,7 @@ function decompress_iwa_file(buf: Uint8Array): Uint8Array {
 		l += len;
 	}
 	if(l !== buf.length) throw new Error("data is not a valid framed stream!");
-	return u8concat(out);
+	return out.length == 1 ? out[0] : u8concat(out);
 }
 
 /** Compress IWA file */
@@ -387,28 +382,52 @@ function compress_iwa_file(buf: Uint8Array): Uint8Array {
 }
 //<<export { decompress_iwa_file, compress_iwa_file };
 
+/** Rich Text */
+interface RichText {
+	/** Raw Text */
+	v: string;
+
+	/** First Hyperlink */
+	l?: string;
+}
+
+/** IWA tree-style comment */
+interface IWAComment {
+	/** text */
+	t?: string;
+	/** author */
+	a?: string;
+	replies?: IWAComment[];
+}
 /** .TST.DataStore */
 interface DataLUT {
 	/** shared string table */
 	sst: string[];
 	/** rich string table table */
-	rsst: string[];
+	rsst: RichText[];
 	/** old format table */
 	ofmt: ProtoMessage[];
 	/** new format table */
 	nfmt: ProtoMessage[];
+	/** formula */
+	fmla: ProtoMessage[];
+	/** formula errors */
+	ferr: ProtoMessage[];
+	/** comment table */
+	cmnt: IWAComment[];
 }
-var numbers_lut_new = (): DataLUT => ({ sst: [], rsst: [], ofmt: [], nfmt: [] });
+var numbers_lut_new = (): DataLUT => ({ sst: [], rsst: [], ofmt: [], nfmt: [], fmla: [], ferr: [], cmnt: [] });
 
 function numbers_format_cell(cell: CellObject, t: number, flags: number, ofmt: ProtoMessage, nfmt: ProtoMessage): void {
 	var ctype = t & 0xFF, ver = t >> 8;
+	/* .TSK.FormatStructArchive */
 	var fmt = ver >= 5 ? nfmt : ofmt;
 	dur: if((flags & (ver > 4 ? 8: 4)) && cell.t == "n" && ctype == 7) {
-		var dstyle =   (fmt[7]?.[0])  ? parse_varint49(fmt[7][0].data)  : -1;
+		var dstyle =   (fmt[7]?.[0])  ? varint_to_i32(fmt[7][0].data)  : -1;
 		if(dstyle == -1) break dur;
-		var dmin =     (fmt[15]?.[0]) ? parse_varint49(fmt[15][0].data) : -1;
-		var dmax =     (fmt[16]?.[0]) ? parse_varint49(fmt[16][0].data) : -1;
-		var auto =     (fmt[40]?.[0]) ? parse_varint49(fmt[40][0].data) : -1;
+		var dmin =     (fmt[15]?.[0]) ? varint_to_i32(fmt[15][0].data) : -1;
+		var dmax =     (fmt[16]?.[0]) ? varint_to_i32(fmt[16][0].data) : -1;
+		var auto =     (fmt[40]?.[0]) ? varint_to_i32(fmt[40][0].data) : -1;
 		var d: number = cell.v as number, dd = d;
 		autodur: if(auto) { // TODO: check if numbers reformats on load
 			if(d == 0) { dmin = dmax = 2; break autodur; }
@@ -471,11 +490,11 @@ function numbers_format_cell(cell: CellObject, t: number, flags: number, ofmt: P
 }
 
 /** Parse "old storage" (version 0..4) */
-function parse_old_storage(buf: Uint8Array, lut: DataLUT, v: 0|1|2|3|4): CellObject | void {
+function parse_old_storage(buf: Uint8Array, lut: DataLUT, v: 0|1|2|3|4, opts?: ParsingOptions): CellObject | void {
 	var dv = u8_to_dataview(buf);
 	var flags = dv.getUint32(4, true);
 
-	var ridx = -1, sidx = -1, zidx = -1, ieee = NaN, dt = new Date(2001, 0, 1);
+	var ridx = -1, sidx = -1, zidx = -1, ieee = NaN, dc = 0, dt = new Date(Date.UTC(2001, 0, 1));
 	var doff = (v > 1 ? 12 : 8);
 	if(flags & 0x0002) { zidx = dv.getUint32(doff,  true); doff += 4;}
 	doff += popcnt(flags & (v > 1 ? 0x0D8C : 0x018C)) * 4;
@@ -484,7 +503,7 @@ function parse_old_storage(buf: Uint8Array, lut: DataLUT, v: 0|1|2|3|4): CellObj
 	doff += popcnt(flags & (v > 1 ? 0x3000 : 0x1000)) * 4;
 	if(flags & 0x0010) { sidx = dv.getUint32(doff,  true); doff += 4; }
 	if(flags & 0x0020) { ieee = dv.getFloat64(doff, true); doff += 8; }
-	if(flags & 0x0040) { dt.setTime(dt.getTime() +  dv.getFloat64(doff, true) * 1000); doff += 8; }
+	if(flags & 0x0040) { dt.setTime(dt.getTime() +  (dc = dv.getFloat64(doff, true)) * 1000); doff += 8; }
 
 	if(v > 1) {
 		flags = dv.getUint32(8, true) >>> 16;
@@ -498,13 +517,19 @@ function parse_old_storage(buf: Uint8Array, lut: DataLUT, v: 0|1|2|3|4): CellObj
 		case 0: return void 0; // return { t: "z" }; // blank?
 		case 2: ret = { t: "n", v: ieee }; break; // number
 		case 3: ret = { t: "s", v: lut.sst[sidx] }; break; // string
-		case 5: ret = { t: "d", v: dt }; break; // date-time
+		case 5: { // date-time
+			if(opts?.cellDates) ret = { t: "d", v: dt };
+			else ret = ({ t: "n", v: dc/(86400)+35430, z: table_fmt[14]});
+		} break;
 		case 6: ret = { t: "b", v: ieee > 0 }; break; // boolean
 		case 7: ret = { t: "n", v: ieee }; break; // duration in seconds
 		case 8: ret = { t: "e", v: 0}; break; // "formula error" TODO: enumerate and map errors to csf equivalents
 		case 9: { // "rich text"
-			if(ridx > -1) ret = { t: "s", v: lut.rsst[ridx] };
-			else throw new Error(`Unsupported cell type ${buf[subarray](0,4)}`);
+			if(ridx > -1) {
+				var rts = lut.rsst[ridx];
+				ret = { t: "s", v: rts.v };
+				if(rts.l) ret.l = { Target: rts.l };
+			} else throw new Error(`Unsupported cell type ${buf[subarray](0,4)}`);
 		} break;
 		default: throw new Error(`Unsupported cell type ${buf[subarray](0,4)}`);
 	}
@@ -515,49 +540,66 @@ function parse_old_storage(buf: Uint8Array, lut: DataLUT, v: 0|1|2|3|4): CellObj
 }
 
 /** Parse "new storage" (version 5) */
-function parse_new_storage(buf: Uint8Array, lut: DataLUT): CellObject | void {
+function parse_new_storage(buf: Uint8Array, lut: DataLUT, opts?: ParsingOptions): CellObject | void {
 	var dv = u8_to_dataview(buf);
 	// TODO: bytes 2:3 appear to be unused?
 	var flags = dv.getUint32(4, true);
 	var fields = dv.getUint32(8, true);
 	var doff = 12;
 
-	var ridx = -1, sidx = -1, zidx = -1, d128 = NaN, ieee = NaN, dt = new Date(2001, 0, 1);
+	var ridx = -1, sidx = -1, zidx = -1, d128 = NaN, ieee = NaN, dc = 0, dt = new Date(Date.UTC(2001, 0, 1)), eidx = -1, fidx = -1;
 
 	//          0x00001F data
 	if(fields & 0x000001) { d128 = readDecimal128LE(buf, doff); doff += 16; }
 	if(fields & 0x000002) { ieee = dv.getFloat64(doff, true); doff += 8; }
-	if(fields & 0x000004) { dt.setTime(dt.getTime() +  dv.getFloat64(doff, true) * 1000); doff += 8; }
+	if(fields & 0x000004) { dt.setTime(dt.getTime() +  (dc = dv.getFloat64(doff, true)) * 1000); doff += 8; }
 	if(fields & 0x000008) { sidx = dv.getUint32(doff,  true); doff += 4; }
 	if(fields & 0x000010) { ridx = dv.getUint32(doff,  true); doff += 4; }
+
+	//          0x0001E0 styling
+	doff += popcnt(fields & 0x0001E0) * 4;
+
+	//          0x000E00 formula
+	if(fields & 0x000200) { fidx = dv.getUint32(doff,  true); doff += 4; }
+	doff += popcnt(fields & 0x000400) * 4;
+	if(fields & 0x000800) { eidx = dv.getUint32(doff,  true); doff += 4; }
 
 	var ret: CellObject;
 	var t = buf[1];
 	switch(t) {
-		case  0: return void 0; // return { t: "z" }; // blank?
+		case  0: ret = { t: "z" }; break;
 		case  2: ret = { t: "n", v: d128 }; break; // number
 		case  3: ret = { t: "s", v: lut.sst[sidx] }; break; // string
-		case  5: ret = { t: "d", v: dt }; break; // date-time
+		case  5: { // date-time
+			if(opts?.cellDates) ret = { t: "d", v: dt };
+			else ret = ({ t: "n", v: dc/(86400)+35430, z: table_fmt[14]});
+		} break;
 		case  6: ret = { t: "b", v: ieee > 0 }; break; // boolean
 		case  7: ret = { t: "n", v: ieee }; break;  // duration in "s", fixed later
 		case  8: ret = { t: "e", v: 0 }; break; // "formula error" TODO: enumerate and map errors to csf equivalents
-		case  9: ret = { t: "s", v: lut.rsst[ridx] }; break;// "rich text"
+		case  9: {
+			if(ridx > -1) {
+				var rts = lut.rsst[ridx];
+				ret = { t: "s", v: rts.v };
+				if(rts.l) ret.l = { Target: rts.l };
+			} else throw new Error(`Unsupported cell type ${buf[1]} : ${fields & 0x1F} : ${buf[subarray](0,4)}`);
+		} break; // "rich text"
 		case 10: ret = { t: "n", v: d128 }; break; // currency
 		default: throw new Error(`Unsupported cell type ${buf[1]} : ${fields & 0x1F} : ${buf[subarray](0,4)}`);
 	}
 
-	//          0x0001E0 styling
-
-	//          0x000E00 formula
-
 	//          0x001000 something related to cell format
-	doff += popcnt(fields & 0x001FE0) * 4;
+	doff += popcnt(fields & 0x001000) * 4;
 
 	/* TODO: stress test if a cell can have multiple sub-type formats */
 	//          0x07E000 formats
 	if(fields & 0x07E000) { if(zidx == -1) zidx = dv.getUint32(doff, true); doff += 4; }
 
 	//          0x080000 comment
+	if(fields & 0x080000) {
+		var cmntidx = dv.getUint32(doff, true); doff += 4;
+		if(lut.cmnt[cmntidx]) ret.c = iwa_to_s5s_comment(lut.cmnt[cmntidx]);
+	}
 	//          0x100000 warning
 
 	if(zidx > -1) numbers_format_cell(ret, t | (5<<8), fields >> 13, lut.ofmt[zidx], lut.nfmt[zidx] );
@@ -566,45 +608,89 @@ function parse_new_storage(buf: Uint8Array, lut: DataLUT): CellObject | void {
 }
 
 /** Write a cell "new storage" (version 5) */
-function write_new_storage(cell: CellObject, sst: string[]): Uint8Array {
-	var out = new Uint8Array(32), dv = u8_to_dataview(out), l = 12, flags = 0;
+function write_new_storage(cell: CellObject, lut: DataLUT): Uint8Array {
+	var out = new Uint8Array(32), dv = u8_to_dataview(out), l = 12, fields = 0;
 	out[0] = 5;
 	switch(cell.t) {
-		case "n": out[1] = 2; writeDecimal128LE(out, l, cell.v as number); flags |= 1; l += 16; break;
-		case "b": out[1] = 6; dv.setFloat64(l, cell.v ? 1 : 0, true); flags |= 2; l += 8; break;
-		case "s":
+		case "n": if(cell.z && fmt_is_date(cell.z)) {
+			out[1] = 5; dv.setFloat64(l, ((numdate((cell.v as number) + 1462)).getTime() - Date.UTC(2001, 0, 1))/1000, true); fields |= 4; l += 8; break
+		} else {
+			out[1] = 2; writeDecimal128LE(out, l, cell.v as number); fields |= 1; l += 16;
+		} break
+		case "b": out[1] = 6; dv.setFloat64(l, cell.v ? 1 : 0, true); fields |= 2; l += 8; break;
+		case "s": {
 			var s = cell.v == null ? "" : String(cell.v);
-			var isst = sst.indexOf(s);
-			if(isst == -1) sst[isst = sst.length] = s;
-			out[1] = 3; dv.setUint32(l, isst, true); flags |= 8; l += 4; break;
+			if(cell.l) {
+				var irsst = lut.rsst.findIndex(v => v.v == s && v.l == cell.l?.Target);
+				if(irsst == -1) lut.rsst[irsst = lut.rsst.length] = { v: s , l: cell.l.Target };
+				out[1] = 9; dv.setUint32(l, irsst, true); fields |= 0x10; l += 4;
+			} else {
+				var isst = lut.sst.indexOf(s);
+				if(isst == -1) lut.sst[isst = lut.sst.length] = s;
+				out[1] = 3; dv.setUint32(l, isst, true); fields |= 8; l += 4;
+			}
+		} break;
+		case "d": out[1] = 5; dv.setFloat64(l, ((cell.v as Date).getTime() - Date.UTC(2001, 0, 1))/1000, true); fields |= 4; l += 8; break;
+
+		case "z": out[1] = 0; break;
 		default: throw "unsupported cell type " + cell.t;
 	}
-	dv.setUint32(8, flags, true);
+	if(cell.c) {
+		lut.cmnt.push(s5s_to_iwa_comment(cell.c));
+		dv.setUint32(l, lut.cmnt.length - 1, true); fields |= 0x80000; l += 4;
+	}
+	dv.setUint32(8, fields, true);
 	return out[subarray](0, l);
 }
 /** Write a cell "old storage" (version 4) */
-function write_old_storage(cell: CellObject, sst: string[]): Uint8Array {
-	var out = new Uint8Array(32), dv = u8_to_dataview(out), l = 12, flags = 0;
+function write_old_storage(cell: CellObject, lut: DataLUT): Uint8Array {
+	var out = new Uint8Array(32), dv = u8_to_dataview(out), l = 12, fields = 0, s = "";
 	out[0] = 4;
+	/* note: rich text appears *before* comments */
 	switch(cell.t) {
-		case "n": out[2] = 2; dv.setFloat64(l, cell.v as number, true); flags |= 0x20; l += 8; break;
-		case "b": out[2] = 6; dv.setFloat64(l, cell.v ? 1 : 0, true); flags |= 0x20; l += 8; break;
-		case "s":
-			var s = cell.v == null ? "" : String(cell.v);
-			var isst = sst.indexOf(s);
-			if(isst == -1) sst[isst = sst.length] = s;
-			out[2] = 3; dv.setUint32(l, isst, true); flags |= 0x10; l += 4; break;
+		case "n": break;
+		case "b": break;
+		case "s": {
+			s = cell.v == null ? "" : String(cell.v);
+			if(cell.l) {
+				var irsst = lut.rsst.findIndex(v => v.v == s && v.l == cell.l?.Target);
+				if(irsst == -1) lut.rsst[irsst = lut.rsst.length] = { v: s, l: cell.l.Target };
+				out[1] = 9; dv.setUint32(l, irsst, true); fields |= 0x200; l += 4;
+			} else { }
+		} break;
+		case "d": break;
+		case "e": break;
+		case "z": break;
 		default: throw "unsupported cell type " + cell.t;
 	}
-	dv.setUint32(8, flags, true);
+	if(cell.c) {
+		/* NOTE: THIS ASSUMES write_new_storage was called */
+		dv.setUint32(l, lut.cmnt.length - 1, true); fields |= 0x1000; l += 4;
+	}
+	switch(cell.t) {
+		case "n": out[1] = 2; dv.setFloat64(l, cell.v as number, true); fields |= 0x20; l += 8; break;
+		case "b": out[1] = 6; dv.setFloat64(l, cell.v ? 1 : 0, true); fields |= 0x20; l += 8; break;
+		case "s": {
+			s = cell.v == null ? "" : String(cell.v);
+			if(cell.l) { } else {
+				var isst = lut.sst.indexOf(s);
+				if(isst == -1) lut.sst[isst = lut.sst.length] = s;
+				out[1] = 3; dv.setUint32(l, isst, true); fields |= 0x10; l += 4;
+			}
+		} break;
+		case "d": out[1] = 5; dv.setFloat64(l, ((cell.v as Date).getTime() - Date.UTC(2001, 0, 1))/1000, true); fields |= 0x40; l += 8; break;
+		case "z": out[1] = 0; break;
+		default: throw "unsupported cell type " + cell.t;
+	}
+	dv.setUint32(8, fields, true);
 	return out[subarray](0, l);
 }
 //<<export { write_new_storage, write_old_storage };
-function parse_cell_storage(buf: Uint8Array, lut: DataLUT): CellObject | void {
+function parse_cell_storage(buf: Uint8Array, lut: DataLUT, opts?: ParsingOptions): CellObject | void {
 	switch(buf[0]) {
 		case 0: case 1:
-		case 2: case 3: case 4: return parse_old_storage(buf, lut, buf[0]);
-		case 5: return parse_new_storage(buf, lut);
+		case 2: case 3: case 4: return parse_old_storage(buf, lut, buf[0], opts);
+		case 5: return parse_new_storage(buf, lut, opts);
 		default: throw new Error(`Unsupported payload version ${buf[0]}`);
 	}
 }
@@ -617,12 +703,11 @@ function parse_cell_storage(buf: Uint8Array, lut: DataLUT): CellObject | void {
 /** Parse .TSP.Reference */
 function parse_TSP_Reference(buf: Uint8Array): number {
 	var pb = parse_shallow(buf);
-	return parse_varint49(pb[1][0].data);
+	return varint_to_i32(pb[1][0].data);
 }
 /** Write .TSP.Reference */
 function write_TSP_Reference(idx: number): Uint8Array {
-	return write_shallow([
-		[],
+	return write_shallow([ [],
 		[ { type: 0, data: write_varint49(idx) } ]
 	]);
 }
@@ -661,7 +746,7 @@ function parse_TST_TableDataList(M: MessageSpace, root: IWAMessage): any[] {
 		switch(type) {
 			case 1: data[key] = u8str(le[3][0].data); break;
 			case 8: {
-				// .TSP.RichTextPayloadArchive
+				// .TST.RichTextPayloadArchive
 				var rt = M[parse_TSP_Reference(le[9][0].data)][0];
 				var rtp = parse_shallow(rt.data);
 
@@ -671,9 +756,42 @@ function parse_TST_TableDataList(M: MessageSpace, root: IWAMessage): any[] {
 				if(mtype != 2001) throw new Error(`2000 unexpected reference to ${mtype}`);
 				var tswpsa = parse_shallow(rtpref.data);
 
-				data[key] = tswpsa[3].map(x => u8str(x.data)).join("");
+				var richtext: RichText = { v: tswpsa[3].map(x => u8str(x.data)).join("") };
+				data[key] = richtext;
+
+				/* NOTE: NUMBERS rich text styling is spiritually similar to XLS */
+				sfields: if(tswpsa?.[11]?.[0]) {
+					// .TSWP.ObjectAttributeTable
+					var smartfields = parse_shallow(tswpsa[11][0].data)?.[1];
+					if(!smartfields) break sfields;
+					smartfields.forEach(sf => {
+						// .TSWP.ObjectAttributeTable.ObjectAttribute
+						var attr = parse_shallow(sf.data);
+						if(attr[2]?.[0]) {
+							var obj = M[parse_TSP_Reference(attr[2]?.[0].data)][0];
+							var objtype = varint_to_i32(obj.meta[1][0].data);
+							switch(objtype) {
+								case 2032: // .TSWP.HyperlinkFieldArchive
+									var hlink = parse_shallow(obj.data);
+									/* TODO: once run-level links are supported, fix this cell assignment */
+									if(hlink?.[2]?.[0] && !richtext.l) richtext.l = u8str(hlink[2][0].data);
+									break;
+								case 2039: // .TSWP.UnsupportedHyperlinkFieldArchive
+									/* TODO: "Sheet" internal links */
+									break;
+								default: console.log(`unrecognized ObjectAttribute type ${objtype}`);
+							}
+						}
+					});
+				}
 			} break;
 			case 2: data[key] = parse_shallow(le[6][0].data); break;
+			case 3: data[key] = parse_shallow(le[5][0].data); break;
+			case 10: {
+				// .TSD.CommentStorageArchive
+				var cs = M[parse_TSP_Reference(le[10][0].data)][0];
+				data[key] = parse_TSD_CommentStorageArchive(M, cs.data);
+			} break;
 			default: throw type;
 		}
 	});
@@ -742,8 +860,50 @@ function parse_TST_Tile(M: MessageSpace, root: IWAMessage): TileInfo {
 	};
 }
 
+/** Parse .TSD.CommentStorageArchive (3056) */
+function parse_TSD_CommentStorageArchive(M: MessageSpace, data: Uint8Array): IWAComment {
+	var out: IWAComment = { t: "", a: ""};
+	var csp = parse_shallow(data);
+	if(csp?.[1]?.[0]?.data) out.t = u8str(csp?.[1]?.[0]?.data) || "";
+	if(csp?.[3]?.[0]?.data) {
+		/* .TSK.AnnotationAuthorArchive (212) */
+		var as = M[parse_TSP_Reference(csp?.[3]?.[0]?.data)][0];
+		var asp = parse_shallow(as.data);
+		if(asp[1]?.[0]?.data) out.a = u8str(asp[1][0].data)
+	}
+	if(csp?.[4]) {
+		out.replies = [];
+		csp[4].forEach(pi => {
+			var cs = M[parse_TSP_Reference(pi.data)][0];
+			out.replies!.push(parse_TSD_CommentStorageArchive(M, cs.data));
+		});
+	}
+	return out;
+}
+/** Create SheetJS threaded comment structure from IWA comment */
+function iwa_to_s5s_comment(iwa: IWAComment): Comments {
+	var out: Comments = [];
+	out.push({t: iwa.t||"", a: iwa.a, T: iwa.replies && (iwa.replies.length > 0) });
+	/* TODO: do apps support a tree of replies? */
+	if(iwa.replies) iwa.replies.forEach(reply => {
+		out.push({t: reply.t ||"", a: reply.a, T:true });
+	});
+	return out;
+}
+/** Create IWA comment from SheetJS threaded comment structure */
+function s5s_to_iwa_comment(s5s: Comments): IWAComment {
+	var out: IWAComment = {a: "", t:"", replies:[]};
+	for(var i = 0; i < s5s.length; ++i) {
+		if(i == 0) { out.a = s5s[i].a; out.t = s5s[i].t; }
+		else {
+			out.replies!.push({a: s5s[i].a, t: s5s[i].t});
+		}
+	}
+	return out;
+}
+
 /** Parse .TST.TableModelArchive (6001) */
-function parse_TST_TableModelArchive(M: MessageSpace, root: IWAMessage, ws: WorkSheet) {
+function parse_TST_TableModelArchive(M: MessageSpace, root: IWAMessage, ws: WorkSheet, opts?: ParsingOptions) {
 	var pb = parse_shallow(root.data);
 	var range: Range = { s: {r:0, c:0}, e: {r:0, c:0} };
 	range.e.r = (varint_to_i32(pb[6][0].data) >>> 0) - 1;
@@ -751,20 +911,33 @@ function parse_TST_TableModelArchive(M: MessageSpace, root: IWAMessage, ws: Work
 	range.e.c = (varint_to_i32(pb[7][0].data) >>> 0) - 1;
 	if(range.e.c < 0) throw new Error(`Invalid col varint ${pb[7][0].data}`);
 	ws["!ref"] = encode_range(range);
-	var dense = Array.isArray(ws);
+	var dense = ws["!data"] != null, dws = (ws as DenseWorkSheet);
 	// .TST.DataStore
 	var store = parse_shallow(pb[4][0].data);
 	var lut: DataLUT = numbers_lut_new();
-	if(store[4]?.[0]) lut.sst = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[4][0].data)][0]);
+	if(store[4]?.[0])  lut.sst  = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[4][0].data)][0]);
+	if(store[6]?.[0])  lut.fmla = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[6][0].data)][0]);
 	if(store[11]?.[0]) lut.ofmt = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[11][0].data)][0]);
+	if(store[12]?.[0]) lut.ferr = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[12][0].data)][0]);
 	if(store[17]?.[0]) lut.rsst = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[17][0].data)][0]);
+	if(store[19]?.[0]) lut.cmnt = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[19][0].data)][0]);
 	if(store[22]?.[0]) lut.nfmt = parse_TST_TableDataList(M, M[parse_TSP_Reference(store[22][0].data)][0]);
 
 	// .TST.TileStorage
 	var tile = parse_shallow(store[3][0].data);
 	var _R = 0;
-	/* TODO: should this list be sorted by id ? */
-	tile[1].forEach(t => {
+
+	// .TST.TableRBTree
+	if(!store[9]?.[0]) throw "NUMBERS file missing row tree";
+	var rtt = parse_shallow(store[9][0].data)[1].map(p => parse_shallow(p.data));
+
+	/* TODO: check examples with ctt */
+	rtt.forEach(kv => {
+		// .TST.TableRBTree.Node
+		_R = varint_to_i32(kv[1][0].data);
+		var tidx = varint_to_i32(kv[2][0].data);
+		var t = tile[1][tidx];
+		if(!t) throw "NUMBERS missing tile " + tidx;
 		var tl = (parse_shallow(t.data));
 		// var id = varint_to_i32(tl[1][0].data);
 		var ref = M[parse_TSP_Reference(tl[2][0].data)][0];
@@ -773,14 +946,13 @@ function parse_TST_TableModelArchive(M: MessageSpace, root: IWAMessage, ws: Work
 		var _tile = parse_TST_Tile(M, ref);
 		_tile.data.forEach((row, R) => {
 			row.forEach((buf, C) => {
-				var res = parse_cell_storage(buf, lut);
+				var res = parse_cell_storage(buf, lut, opts);
 				if(res) {
 					if(dense) {
-						if(!ws[_R + R]) ws[_R + R] = [];
-						ws[_R + R][C] = res;
+						if(!dws["!data"][_R + R]) dws["!data"][_R + R] = [];
+						dws["!data"][_R + R][C] = res;
 					} else {
-						var addr = encode_cell({r:_R + R,c:C});
-						ws[addr] = res;
+						ws[encode_col(C) + encode_row(_R + R)] = res;
 					}
 				}
 			});
@@ -810,14 +982,12 @@ function parse_TST_TableModelArchive(M: MessageSpace, root: IWAMessage, ws: Work
 function parse_TST_TableInfoArchive(M: MessageSpace, root: IWAMessage, opts?: ParsingOptions): WorkSheet {
 	var pb = parse_shallow(root.data);
 	// ESBuild #2375
-	var out: WorkSheet;
-	if(!opts?.dense) out =  ({ "!ref": "A1" });
-	else out = ([] as any);
-	out["!ref"] = "A1";
+	var out: WorkSheet = { "!ref": "A1" };
+	if(opts?.dense) (out as DenseWorkSheet)["!data"] = [];
 	var tableref = M[parse_TSP_Reference(pb[2][0].data)];
 	var mtype = varint_to_i32(tableref[0].meta[1][0].data);
 	if(mtype != 6001) throw new Error(`6000 unexpected reference to ${mtype}`);
-	parse_TST_TableModelArchive(M, tableref[0], out);
+	parse_TST_TableModelArchive(M, tableref[0], out, opts);
 	return out;
 }
 
@@ -845,6 +1015,7 @@ function parse_TN_SheetArchive(M: MessageSpace, root: IWAMessage, opts?: Parsing
 /** Parse .TN.DocumentArchive */
 function parse_TN_DocumentArchive(M: MessageSpace, root: IWAMessage, opts?: ParsingOptions): WorkBook {
 	var out = book_new();
+	out.Workbook = { WBProps: { date1904: true } };
 	var pb = parse_shallow(root.data);
 	if(pb[2]?.[0]) throw new Error("Keynote presentations are not supported");
 
@@ -879,11 +1050,11 @@ function parse_numbers_iwa(cfb: CFB$Container, opts?: ParsingOptions ): WorkBook
 	/* collect entire message space */
 	cfb.FileIndex.forEach(s => {
 		if(!s.name.match(/\.iwa$/)) return;
-		if(s.content[0] == 98) return; // TODO: OperationStorage.iwa
+		if(s.content[0] != 0) return; // TODO: this should test if the iwa follows the framing format
 		var o: Uint8Array;
-		try { o = decompress_iwa_file(s.content as Uint8Array); } catch(e) { return console.log("?? " + s.content.length + " " + (e.message || e)); }
+		try { o = decompress_iwa_file(s.content as Uint8Array); } catch(e: any) { return console.log("?? " + s.content.length + " " + ((e as Error).message || e)); }
 		var packets: IWAArchiveInfo[];
-		try { packets = parse_iwa_file(o); } catch(e) { return console.log("## " + (e.message || e)); }
+		try { packets = parse_iwa_file(o); } catch(e: any) { return console.log("## " + ((e as Error).message || e)); }
 		packets.forEach(packet => { M[packet.id] = packet.messages; indices.push(packet.id); });
 	});
 	if(!indices.length) throw new Error("File has no messages");
@@ -912,7 +1083,7 @@ interface DependentInfo {
 	type: number;
 }
 /** Write .TST.TileRowInfo */
-function write_TST_TileRowInfo(data: any[], SST: string[], wide: boolean): ProtoMessage {
+function write_TST_TileRowInfo(data: CellObject[], lut: DataLUT, wide: boolean): ProtoMessage {
 	var tri: ProtoMessage = [
 		[],
 		[ { type: 0, data: write_varint49(0) }],
@@ -944,30 +1115,27 @@ function write_TST_TileRowInfo(data: any[], SST: string[], wide: boolean): Proto
 	var _dv = u8_to_dataview(tri[4][0].data), _last_offset = 0, _cell_storage: Uint8Array[] = [];
 	var width = wide ? 4 : 1;
 	for(var C = 0; C < data.length; ++C) {
-		if(data[C] == null) { dv.setUint16(C*2, 0xFFFF, true); _dv.setUint16(C*2, 0xFFFF); continue; }
+		/* TODO: serialize errors */
+		if(data[C] == null || (data[C].t == "z" && !data[C].c?.length) || data[C].t == "e") { dv.setUint16(C*2, 0xFFFF, true); _dv.setUint16(C*2, 0xFFFF); continue; }
 		dv.setUint16(C*2, last_offset / width, true);
 		/*if(!wide)*/ _dv.setUint16(C*2, _last_offset / width, true);
 		var celload: Uint8Array, _celload: Uint8Array;
-		switch(typeof data[C]) {
-			case "string":
-				celload = write_new_storage({t: "s", v: data[C]}, SST);
-				/*if(!wide)*/ _celload = write_old_storage({t: "s", v: data[C]}, SST);
-				break;
-			case "number":
-				celload = write_new_storage({t: "n", v: data[C]}, SST);
-				/*if(!wide)*/ _celload = write_old_storage({t: "n", v: data[C]}, SST);
-				break;
-			case "boolean":
-				celload = write_new_storage({t: "b", v: data[C]}, SST);
-				/*if(!wide)*/ _celload = write_old_storage({t: "b", v: data[C]}, SST);
-				break;
-			default:
-				// TODO: write the actual date code
-				if(data[C] instanceof Date) {
-					celload = write_new_storage({t: "s", v: (data[C] as Date).toISOString()}, SST);
-					/*if(!wide)*/ _celload = write_old_storage({t: "s", v: (data[C] as Date).toISOString()}, SST);
+		switch(data[C].t) {
+			case "d":
+				if(data[C].v instanceof Date) {
+					celload = write_new_storage(data[C], lut);
+					/*if(!wide)*/ _celload = write_old_storage(data[C], lut);
 					break;
 				}
+				/* TODO: can esbuild preserve falls through comments ? */
+				celload = write_new_storage(data[C], lut);
+				/*if(!wide)*/ _celload = write_old_storage(data[C], lut);
+				break;
+			case "s": case "n": case "b": case "z":
+				celload = write_new_storage(data[C], lut);
+				/*if(!wide)*/ _celload = write_old_storage(data[C], lut);
+				break;
+			default:
 				throw new Error("Unsupported value " + data[C]);
 		}
 		cell_storage.push(celload); last_offset += celload.length;
@@ -1018,7 +1186,7 @@ function build_numbers_deps(cfb: CFB$Container): Dependents {
 		var fi = row[0], fp = row[1];
 		if(fi.type != 2) return;
 		if(!fi.name.match(/\.iwa/)) return;
-		if(fi.name.match(/OperationStorage/)) return;
+		if((fi.content as Uint8Array)[0] != 0) return; // TODO: this should test if the iwa follows the framing format
 
 		parse_iwa_file(decompress_iwa_file(fi.content as Uint8Array)).forEach(packet => {
 			indices.push(packet.id);
@@ -1026,26 +1194,43 @@ function build_numbers_deps(cfb: CFB$Container): Dependents {
 		});
 	});
 
-	/* precompute a varint for each id */
-	indices.sort((x,y) => x-y);
-	var indices_varint: Array<[number, Uint8Array]> = indices.filter(x => x > 1).map(x => [x, write_varint49(x)] );
-
 	/* build dependent tree */
 	cfb.FileIndex.forEach(fi => {
 		if(!fi.name.match(/\.iwa/)) return;
-		if(fi.name.match(/OperationStorage/)) return;
+		if((fi.content as Uint8Array)[0] != 0) return; // TODO: this should test if the iwa follows the framing format
 		parse_iwa_file(decompress_iwa_file(fi.content as Uint8Array)).forEach(ia => {
-			// this is a huge hack based on the observation that most messages of interest have id > 900000
-			// TODO: use the actual references
-			indices_varint.forEach(ivi => {
-				if(ia.messages.some(mess => varint_to_i32(mess.meta[1][0].data) != 11006 && u8contains(mess.data, ivi[1]))) {
-					dependents[ivi[0]].deps.push(ia.id);
-				}
+			ia.messages.forEach(mess => {
+				[5,6].forEach(f => {
+					if(!mess.meta[f]) return;
+					mess.meta[f].forEach(x => {
+						dependents[ia.id].deps.push(varint_to_i32(x.data));
+					});
+				});
 			});
 		});
 	});
-
 	return dependents;
+}
+
+/** Generate .TSP.Color from r/g/b (0-255) */
+function write_TSP_Color_RGB(r: number, g: number, b: number): Uint8Array { return write_shallow([[],
+	[{ type: 0, data: write_varint49(1) }],
+	[],
+	[{ type: 5, data: new Uint8Array(Float32Array.from([r/255]).buffer)}],
+	[{ type: 5, data: new Uint8Array(Float32Array.from([g/255]).buffer)}],
+	[{ type: 5, data: new Uint8Array(Float32Array.from([b/255]).buffer)}],
+	[{ type: 5, data: new Uint8Array(Float32Array.from([1]).buffer)}],
+	[], [], [], [], [],
+	[{ type: 0, data: write_varint49(1) }]
+]); }
+
+function get_author_color(n: number): Uint8Array {
+	switch(n) {
+		case 0: return write_TSP_Color_RGB(0x63, 0xDE, 0xAB);
+		case 1: return write_TSP_Color_RGB(0xA2, 0xC5, 0xF0);
+		case 2: return write_TSP_Color_RGB(0xFF, 0xBD, 0xBD);
+	}
+	return write_TSP_Color_RGB(Math.random()*255, Math.random()*255, Math.random()*255);
 }
 
 /** Write NUMBERS workbook */
@@ -1091,6 +1276,76 @@ function numbers_iwa_find(cfb: CFB$Container, deps: Dependents, id: number) {
 	var ainfo: IWAArchiveInfo = x.find(packet => packet.id == id) as IWAArchiveInfo;
 	// TODO: it's assumed this exists
 	return ainfo;
+}
+
+function numbers_add_meta(mlist: ProtoMessage, newid: number, newloc: string) {
+	mlist[3].push({type: 2, data: write_shallow([ [],
+		[{type: 0, data: write_varint49(newid)}],
+		[{type: 2, data: stru8(newloc.replace(/-.*$/, "")) }],
+		[{type: 2, data: stru8(newloc)}],
+		[{type: 2, data: new Uint8Array([2, 0, 0])}],
+		[{type: 2, data: new Uint8Array([2, 0, 0])}],
+		[], [], [], [], // skip fields 6-9
+		[{type: 0, data: write_varint49(0)}],
+		[],
+		[{type: 0, data: write_varint49(0 /* TODO: save_token */)}],
+	])});
+	mlist[1] = [{type: 0, data: write_varint49(Math.max(newid + 1, varint_to_i32(mlist[1][0].data) ))}];
+}
+
+function numbers_add_msg(cfb: CFB$Container, type: number, msg: ProtoMessage, path: string, deps: Dependents, id?: number): number {
+	if(!id) id = get_unique_msgid({ deps: [], location: "", type }, deps);
+	var loc = `${path}-${id}.iwa`;
+	deps[id].location = "Root Entry" + loc;
+	CFB.utils.cfb_add(cfb, loc, compress_iwa_file(write_iwa_file([{
+		id,
+		messages: [ write_iwam(type, write_shallow(msg)) ]
+	}])));
+	var newloc = loc.replace(/^[\/]/, "").replace(/^Index\//, "").replace(/\.iwa$/,"");
+	numbers_iwa_doit(cfb, deps, 2, ai => {
+		var mlist = parse_shallow(ai.messages[0].data);
+		numbers_add_meta(mlist, id||0, newloc);
+
+		ai.messages[0].data = write_shallow(mlist);
+	})
+	return id;
+}
+
+/** Add dependency to metadata */
+function numbers_meta_add_dep(mlist: ProtoMessage, deps: Dependents, id: number, dep: number|number[]) {
+	var loc = deps[id].location.replace(/^Root Entry\//,"").replace(/^Index\//, "").replace(/\.iwa$/,"");
+	var parentidx = mlist[3].findIndex(m => {
+		var mm = parse_shallow(m.data);
+		if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
+		if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
+		return false;
+	});
+	var parent = parse_shallow(mlist[3][parentidx].data);
+	if(!parent[6]) parent[6] = [];
+	(Array.isArray(dep) ? dep : [dep]).forEach(dep => {
+		parent[6].push({
+			type: 2,
+			data: write_shallow([ [],
+				[{type: 0, data: write_varint49(dep) }]
+			])
+		});
+	});
+	mlist[3][parentidx].data = write_shallow(parent);
+}
+
+/** Remove dependency from metadata */
+function numbers_meta_del_dep(mlist: ProtoMessage, deps: Dependents, id: number, dep: number|number[]) {
+	var loc = deps[id].location.replace(/^Root Entry\//,"").replace(/^Index\//, "").replace(/\.iwa$/,"");
+	var parentidx = mlist[3].findIndex(m => {
+		var mm = parse_shallow(m.data);
+		if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
+		if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
+		return false;
+	});
+	var parent = parse_shallow(mlist[3][parentidx].data);
+	if(!parent[6]) parent[6] = [];
+	parent[6] = parent[6].filter(m => varint_to_i32(parse_shallow(m.data)[1][0].data) != dep);
+	mlist[3][parentidx].data = write_shallow(parent);
 }
 
 /** Deep copy of the essential parts of a worksheet */
@@ -1142,29 +1397,12 @@ function numbers_add_ws(cfb: CFB$Container, deps: Dependents, wsidx: number) {
 		tia.id = tiaref;
 		if(deps[drawables[0]].location == deps[newsheetref].location) arch.push(tia);
 		else {
-			var loc = deps[newsheetref].location;
-			loc = loc.replace(/^Root Entry\//,""); // NOTE: the Root Entry prefix is an artifact of the CFB container library
-			loc = loc.replace(/^Index\//, "").replace(/\.iwa$/,"");
+			/* TODO: there are a number of places that assume the metadata record has ID=2 */
 			numbers_iwa_doit(cfb, deps, 2, (ai => {
 				var mlist = parse_shallow(ai.messages[0].data);
 
 				/* add reference from SheetArchive file to TIA */
-				var parentidx = mlist[3].findIndex(m => {
-					var mm = parse_shallow(m.data);
-					if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
-					if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
-					return false;
-				});
-				var parent = parse_shallow(mlist[3][parentidx].data);
-				if(!parent[6]) parent[6] = [];
-				parent[6].push({
-					type: 2,
-					data: write_shallow([
-						[],
-						[{type: 0, data: write_varint49(tiaref) }]
-					])
-				});
-				mlist[3][parentidx].data = write_shallow(parent);
+				numbers_meta_add_dep(mlist, deps, newsheetref, tiaref);
 
 				ai.messages[0].data = write_shallow(mlist);
 			}));
@@ -1205,16 +1443,11 @@ function numbers_add_ws(cfb: CFB$Container, deps: Dependents, wsidx: number) {
 		tiaroot.messages[0].data = write_shallow(tia);
 	});
 
-	/* identifier for finding the TableModelArchive in the archive */
-	var loc = deps[tmaref].location;
-	loc = loc.replace(/^Root Entry\//,""); // NOTE: the Root Entry prefix is an artifact of the CFB container library
-	loc = loc.replace(/^Index\//, "").replace(/\.iwa$/,"");
-
 	/* .TST.TableModelArchive */
 	numbers_iwa_doit(cfb, deps, tmaref, (tmaroot: IWAArchiveInfo, arch: IWAArchiveInfo[]) => {
 		/* TODO: formulae currently break due to missing CE details */
 		var tma = parse_shallow(tmaroot.messages[0].data);
-		var uuid = u8str(tma[1][0].data), new_uuid = uuid.replace(/-[A-Z0-9]*/, `-${wsidx.toString(16).padStart(4, "0")}`);
+		var uuid = u8str(tma[1][0].data), new_uuid = uuid.replace(/-[A-Z0-9]*/, `-${("0000" + wsidx.toString(16)).slice(-4)}`);
 		tma[1][0].data = stru8(new_uuid);
 
 		/* NOTE: These lists should be revisited every time the template is changed */
@@ -1277,49 +1510,17 @@ function numbers_add_ws(cfb: CFB$Container, deps: Dependents, wsidx: number) {
 					if(deps[newref].location == deps[oldref].location) deps[newref].location = deps[newref].location.replace(/\.iwa/, `-${newref}.iwa`);
 					CFB.utils.cfb_add(cfb, deps[newref].location, compress_iwa_file(write_iwa_file([ msg ])));
 
-					var newloc = deps[newref].location;
-					newloc = newloc.replace(/^Root Entry\//,""); // NOTE: the Root Entry prefix is an artifact of the CFB container library
-					newloc = newloc.replace(/^Index\//, "").replace(/\.iwa$/,"");
+					var newloc = deps[newref].location.replace(/^Root Entry\//,"").replace(/^Index\//, "").replace(/\.iwa$/,"");
 
-					numbers_iwa_doit(cfb, deps, 2, (ai => {
+					numbers_iwa_doit(cfb, deps, 2, ai => {
 						var mlist = parse_shallow(ai.messages[0].data);
-						mlist[3].push({type: 2, data: write_shallow([
-							[],
-							[{type: 0, data: write_varint49(newref)}],
-							[{type: 2, data: stru8(newloc.replace(/-.*$/, "")) }],
-							[{type: 2, data: stru8(newloc)}],
-							[{type: 2, data: new Uint8Array([2, 0, 0])}],
-							[{type: 2, data: new Uint8Array([2, 0, 0])}],
-							[],
-							[],
-							[],
-							[],
-							[{type: 0, data: write_varint49(0)}],
-							[],
-							[{type: 0, data: write_varint49(0 /* TODO: save_token */)}],
-						])});
-						mlist[1] = [{type: 0, data: write_varint49(Math.max(newref + 1, parse_varint49(mlist[1][0].data) ))}];
+						numbers_add_meta(mlist, newref, newloc);
 
 						/* add reference from TableModelArchive file to Tile */
-						var parentidx = mlist[3].findIndex(m => {
-							var mm = parse_shallow(m.data);
-							if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
-							if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
-							return false;
-						});
-						var parent = parse_shallow(mlist[3][parentidx].data);
-						if(!parent[6]) parent[6] = [];
-						parent[6].push({
-							type: 2,
-							data: write_shallow([
-								[],
-								[{type: 0, data: write_varint49(newref) }]
-							])
-						});
-						mlist[3][parentidx].data = write_shallow(parent);
+						numbers_meta_add_dep(mlist, deps, tmaref, newref);
 
 						ai.messages[0].data = write_shallow(mlist);
-					}));
+					});
 				}
 				store[n][0].data = write_TSP_Reference(newref);
 			});
@@ -1342,46 +1543,14 @@ function numbers_add_ws(cfb: CFB$Container, deps: Dependents, wsidx: number) {
 						if(deps[newref].location == deps[oldref].location) deps[newref].location = deps[newref].location.replace(/\.iwa/, `-${newref}.iwa`);
 						CFB.utils.cfb_add(cfb, deps[newref].location, compress_iwa_file(write_iwa_file([ msg ])));
 
-						var newloc = deps[newref].location;
-						newloc = newloc.replace(/^Root Entry\//,""); // NOTE: the Root Entry prefix is an artifact of the CFB container library
-						newloc = newloc.replace(/^Index\//, "").replace(/\.iwa$/,"");
+						var newloc = deps[newref].location.replace(/^Root Entry\//,"").replace(/^Index\//, "").replace(/\.iwa$/,"");
 
 						numbers_iwa_doit(cfb, deps, 2, (ai => {
 							var mlist = parse_shallow(ai.messages[0].data);
-							mlist[3].push({type: 2, data: write_shallow([
-								[],
-								[{type: 0, data: write_varint49(newref)}],
-								[{type: 2, data: stru8(newloc.replace(/-.*$/, "")) }],
-								[{type: 2, data: stru8(newloc)}],
-								[{type: 2, data: new Uint8Array([2, 0, 0])}],
-								[{type: 2, data: new Uint8Array([2, 0, 0])}],
-								[],
-								[],
-								[],
-								[],
-								[{type: 0, data: write_varint49(0)}],
-								[],
-								[{type: 0, data: write_varint49(0 /* TODO: save_token */)}],
-							])});
-							mlist[1] = [{type: 0, data: write_varint49(Math.max(newref + 1, parse_varint49(mlist[1][0].data) ))}];
+							numbers_add_meta(mlist, newref, newloc);
 
 							/* add reference from TableModelArchive file to Tile */
-							var parentidx = mlist[3].findIndex(m => {
-								var mm = parse_shallow(m.data);
-								if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
-								if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
-								return false;
-							});
-							var parent = parse_shallow(mlist[3][parentidx].data);
-							if(!parent[6]) parent[6] = [];
-							parent[6].push({
-								type: 2,
-								data: write_shallow([
-									[],
-									[{type: 0, data: write_varint49(newref) }]
-								])
-							});
-							mlist[3][parentidx].data = write_shallow(parent);
+							numbers_meta_add_dep(mlist, deps, tmaref, newref);
 
 							ai.messages[0].data = write_shallow(mlist);
 						}));
@@ -1412,40 +1581,21 @@ function numbers_add_ws(cfb: CFB$Container, deps: Dependents, wsidx: number) {
 
 						numbers_iwa_doit(cfb, deps, 2, (ai => {
 							var mlist = parse_shallow(ai.messages[0].data);
-							mlist[3].push({type: 2, data: write_shallow([
-								[],
+							mlist[3].push({type: 2, data: write_shallow([ [],
 								[{type: 0, data: write_varint49(newtileref)}],
 								[{type: 2, data: stru8("Tables/Tile") }],
 								[{type: 2, data: stru8(`Tables/Tile-${newtileref}`)}],
 								[{type: 2, data: new Uint8Array([2, 0, 0])}],
 								[{type: 2, data: new Uint8Array([2, 0, 0])}],
-								[],
-								[],
-								[],
-								[],
+								[], [], [], [], // skip fields 6-9
 								[{type: 0, data: write_varint49(0)}],
 								[],
 								[{type: 0, data: write_varint49(0 /* TODO: save_token */)}],
 							])});
-							mlist[1] = [{type: 0, data: write_varint49(Math.max(newtileref + 1, parse_varint49(mlist[1][0].data) ))}];
+							mlist[1] = [{type: 0, data: write_varint49(Math.max(newtileref + 1, varint_to_i32(mlist[1][0].data) ))}];
 
 							/* add reference from TableModelArchive file to Tile */
-							var parentidx = mlist[3].findIndex(m => {
-								var mm = parse_shallow(m.data);
-								if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
-								if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
-								return false;
-							});
-							var parent = parse_shallow(mlist[3][parentidx].data);
-							if(!parent[6]) parent[6] = [];
-							parent[6].push({
-								type: 2,
-								data: write_shallow([
-									[],
-									[{type: 0, data: write_varint49(newtileref) }]
-								])
-							});
-							mlist[3][parentidx].data = write_shallow(parent);
+							numbers_meta_add_dep(mlist, deps, tmaref, newtileref);
 
 							ai.messages[0].data = write_shallow(mlist);
 						}));
@@ -1491,6 +1641,7 @@ var USE_WIDE_ROWS = true;
 
 /** Write .TST.TableModelArchive */
 function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, tmaroot: IWAArchiveInfo, tmafile: IWAArchiveInfo[], tmaref: number) {
+	if(!ws["!ref"]) throw new Error("Cannot export empty sheet to NUMBERS");
 	var range = decode_range(ws["!ref"] as string);
 	range.s.r = range.s.c = 0;
 
@@ -1501,13 +1652,31 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 	if(trunc) console.error(`Truncating to ${encode_range(range)}`);
 
 	/* preprocess data and build up shared string table */
-	var data = sheet_to_json<any>(ws, { range, header: 1 });
-	var SST = ["~Sh33tJ5~"];
+	var data: CellObject[][] = [];
+	if(ws["!data"]) data = ws["!data"];
+	else {
+		var colstr: string[] = [];
+		for(var _C = 0; _C <= range.e.c; ++_C) colstr[_C] = encode_col(_C);
+		for(var R_ = 0; R_ <= range.e.r; ++R_) {
+			data[R_] = [];
+			var _R = "" + (R_+1);
+			for(_C = 0; _C <= range.e.c; ++_C) {
+				var _cell = ws[colstr[_C] + _R];
+				if(!_cell) continue;
+				data[R_][_C] = _cell;
+			}
+		}
+	}
+	var LUT: DataLUT = {
+		 cmnt: [{a: "~54ee77S~", t: "... the people who are crazy enough to think they can change the world, are the ones who do."}],
+		 ferr: [],
+		 fmla: [],
+		 nfmt: [],
+		 ofmt: [],
+		 rsst: [{v:"~54ee77S~", l: "https://sheetjs.com/"}],
+		 sst:  ["~Sh33tJ5~"]
+	};
 
-	/* identifier for finding the TableModelArchive in the archive */
-	var loc = deps[tmaref].location;
-	loc = loc.replace(/^Root Entry\//,""); // NOTE: the Root Entry prefix is an artifact of the CFB container library
-	loc = loc.replace(/^Index\//, "").replace(/\.iwa$/,"");
 
 	var pb = parse_shallow(tmaroot.messages[0].data);
 	{
@@ -1565,31 +1734,23 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 					var metadata = numbers_iwa_find(cfb, deps, 2);
 					var mlist = parse_shallow(metadata.messages[0].data);
 					/* .TSP.ComponentInfo field 1 is the id, field 12 is the save token */
-					var mlst = mlist[3].filter(m => parse_varint49(parse_shallow(m.data)[1][0].data) == tileref);
-					return (mlst?.length) ? parse_varint49(parse_shallow(mlst[0].data)[12][0].data) : 0;
+					var mlst = mlist[3].filter(m => varint_to_i32(parse_shallow(m.data)[1][0].data) == tileref);
+					return (mlst?.length) ? varint_to_i32(parse_shallow(mlst[0].data)[12][0].data) : 0;
 				})();
 
 				/* remove existing tile */
 				{
 					CFB.utils.cfb_del(cfb, deps[tileref].location);
 
-					/* remove existing tile from reference -- TODO: can this have an id other than 2? */
+					/* remove existing tile from reference */
 					numbers_iwa_doit(cfb, deps, 2, (ai => {
 						var mlist = parse_shallow(ai.messages[0].data);
 
-						mlist[3] = mlist[3].filter(m => parse_varint49(parse_shallow(m.data)[1][0].data) != tileref);
+						/* remove metadata entry for tile */
+						mlist[3] = mlist[3].filter(m => varint_to_i32(parse_shallow(m.data)[1][0].data) != tileref);
 
 						/* remove reference from TableModelArchive file to Tile */
-						var parentidx = mlist[3].findIndex(m => {
-							var mm = parse_shallow(m.data);
-							if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
-							if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
-							return false;
-						});
-						var parent = parse_shallow(mlist[3][parentidx].data);
-						if(!parent[6]) parent[6] = [];
-						parent[6] = parent[6].filter(m => parse_varint49(parse_shallow(m.data)[1][0].data) != tileref);
-						mlist[3][parentidx].data = write_shallow(parent);
+						numbers_meta_del_dep(mlist, deps, tmaref, tileref);
 
 						ai.messages[0].data = write_shallow(mlist);
 					}));
@@ -1610,8 +1771,7 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 					deps[newtileid].location = `Root Entry/Index/Tables/Tile-${newtileid}.iwa`;
 
 					/* create new tile */
-					var tiledata: ProtoMessage = [
-						[],
+					var tiledata: ProtoMessage = [ [],
 						[{type: 0, data: write_varint49(0 /*range.e.c + 1*/)}],
 						[{type: 0, data: write_varint49(Math.min(range.e.r + 1, (tidx + 1) * tstride))}],
 						[{type: 0, data: write_varint49(0/*cnt*/)}],
@@ -1622,14 +1782,13 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 						[{type: 0, data: write_varint49(USE_WIDE_ROWS ? 1 : 0)}]
 					];
 					for(var R = tidx * tstride; R <= Math.min(range.e.r, (tidx + 1) * tstride - 1); ++R) {
-						var tilerow = write_TST_TileRowInfo(data[R], SST, USE_WIDE_ROWS);
+						var tilerow = write_TST_TileRowInfo(data[R], LUT, USE_WIDE_ROWS);
 						tilerow[1][0].data = write_varint49(R - tidx * tstride);
 						tiledata[5].push({data: write_shallow(tilerow), type: 2});
 					}
 
 					/* add to tiles */
-					tilestore[1].push({type: 2, data: write_shallow([
-						[],
+					tilestore[1].push({type: 2, data: write_shallow([ [],
 						[{type: 0, data: write_varint49(tidx)}],
 						[{type: 2, data: write_TSP_Reference(newtileid)}]
 					])});
@@ -1642,43 +1801,24 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 					var tilecontent = compress_iwa_file(write_iwa_file([newtile]));
 					CFB.utils.cfb_add(cfb, `/Index/Tables/Tile-${newtileid}.iwa`, tilecontent);
 
-					/* update metadata -- TODO: can this have an id other than 2? */
+					/* update metadata */
 					numbers_iwa_doit(cfb, deps, 2, (ai => {
 						var mlist = parse_shallow(ai.messages[0].data);
-						mlist[3].push({type: 2, data: write_shallow([
-							[],
+						mlist[3].push({type: 2, data: write_shallow([ [],
 							[{type: 0, data: write_varint49(newtileid)}],
 							[{type: 2, data: stru8("Tables/Tile") }],
 							[{type: 2, data: stru8(`Tables/Tile-${newtileid}`)}],
 							[{type: 2, data: new Uint8Array([2, 0, 0])}],
 							[{type: 2, data: new Uint8Array([2, 0, 0])}],
-							[],
-							[],
-							[],
-							[],
+							[], [], [], [], // skip fields 6-9
 							[{type: 0, data: write_varint49(0)}],
-							[],
+							[], // skip field 11
 							[{type: 0, data: write_varint49(save_token)}],
 						])});
-						mlist[1] = [{type: 0, data: write_varint49(Math.max(newtileid + 1, parse_varint49(mlist[1][0].data) ))}];
+						mlist[1] = [{type: 0, data: write_varint49(Math.max(newtileid + 1, varint_to_i32(mlist[1][0].data) ))}];
 
 						/* add reference from TableModelArchive file to Tile */
-						var parentidx = mlist[3].findIndex(m => {
-							var mm = parse_shallow(m.data);
-							if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
-							if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
-							return false;
-						});
-						var parent = parse_shallow(mlist[3][parentidx].data);
-						if(!parent[6]) parent[6] = [];
-						parent[6].push({
-							type: 2,
-							data: write_shallow([
-								[],
-								[{type: 0, data: write_varint49(newtileid) }]
-							])
-						});
-						mlist[3][parentidx].data = write_shallow(parent);
+						numbers_meta_add_dep(mlist, deps, tmaref, newtileid);
 
 						ai.messages[0].data = write_shallow(mlist);
 					}));
@@ -1687,8 +1827,7 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 					numbers_add_oref(tmaroot, newtileid);
 
 					/* add to row rbtree */
-					rbtree[1].push({type: 2, data: write_shallow([
-						[],
+					rbtree[1].push({type: 2, data: write_shallow([ [],
 						[{ type: 0, data: write_varint49(tidx*tstride) }],
 						[{ type: 0, data: write_varint49(tidx) }]
 					])});
@@ -1725,22 +1864,7 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 					var mlist = parse_shallow(ai.messages[0].data);
 
 					/* add reference from TableModelArchive file to merge */
-					var parentidx = mlist[3].findIndex(m => {
-						var mm = parse_shallow(m.data);
-						if(mm[3]?.[0]) return u8str(mm[3][0].data) == loc;
-						if(mm[2]?.[0] && u8str(mm[2][0].data) == loc) return true;
-						return false;
-					});
-					var parent = parse_shallow(mlist[3][parentidx].data);
-					if(!parent[6]) parent[6] = [];
-					parent[6].push({
-						type: 2,
-						data: write_shallow([
-							[],
-							[{type: 0, data: write_varint49(mergeid) }]
-						])
-					});
-					mlist[3][parentidx].data = write_shallow(parent);
+					numbers_meta_add_dep(mlist, deps, tmaref, mergeid);
 
 					ai.messages[0].data = write_shallow(mlist);
 				}));
@@ -1756,7 +1880,7 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 				var sstdata = parse_shallow(sstroot.messages[0].data);
 				{
 					sstdata[3] = [];
-					SST.forEach((str, i) => {
+					LUT.sst.forEach((str, i) => {
 						if(i == 0) return; // Numbers will assert if index zero
 						sstdata[3].push({type: 2, data: write_shallow([ [],
 							[ { type: 0, data: write_varint49(i) } ],
@@ -1768,6 +1892,208 @@ function write_numbers_tma(cfb: CFB$Container, deps: Dependents, ws: WorkSheet, 
 				sstroot.messages[0].data = write_shallow(sstdata);
 			});
 
+			/* rebuild rich shared string table */
+			var rsstref = parse_TSP_Reference(store[17][0].data);
+			numbers_iwa_doit(cfb, deps, rsstref, (rsstroot) => {
+				var rsstdata = parse_shallow(rsstroot.messages[0].data);
+				/* TODO: remove unused children */
+				rsstdata[3] = [];
+
+				/* TODO: this must be in sync with zahl */
+				var style_indices = [
+					904980, // hardcoded stylesheet
+					903835, // paragraph style
+					903815, // list style
+					903845  // character style
+				];
+
+				LUT.rsst.forEach((rsst, i) => {
+					if(i == 0) return;
+
+					/* create .TSWP.StorageArchive (2001) */
+					var tswpsa: ProtoMessage = [ [],
+						[ { type: 0, data: new Uint8Array([5]) }], // .TSWP.StorageArchive.KindType CELL = 5
+						[],
+						[ { type: 2, data: stru8(rsst.v) }]
+					];
+					tswpsa[10] = [ { type: 0, data: new Uint8Array([1]) } ];
+					tswpsa[19] = [ { type: 2, data: new Uint8Array([10, 6, 8, 0, 18, 2, 101, 110])}]; // "en"
+
+					// Even though field 5 `table_para_style` is "optional", Numbers 13 crashes without a clear error message if this is not included
+					tswpsa[5]  = [ { type: 2, data: new Uint8Array([0x0a, 0x08, 0x08, 0x00, 0x12, 0x04, 0x08, 0x9b, 0x95, 0x37])}];
+
+					// At least Numbers tells you the file is corrupt if some of these fields are missing
+					tswpsa[2]  = [ { type: 2, data: new Uint8Array([8, 148, 158, 55])}]; // msg 904980 TODO: verify in the zahl build script
+					tswpsa[6]  = [ { type: 2, data: new Uint8Array([0x0a, 0x06, 0x08, 0x00, 0x10, 0x00, 0x18, 0x00])}];
+					tswpsa[7]  = [ { type: 2, data: new Uint8Array([0x0a, 0x08, 0x08, 0x00, 0x12, 0x04, 0x08, 0x87, 0x95, 0x37])}];
+					tswpsa[8]  = [ { type: 2, data: new Uint8Array([10, 8, 8, 0, 18, 4, 8, 165, 149, 55])}]; // TODO: revisit with mixed links
+					tswpsa[14] = [ { type: 2, data: new Uint8Array([0x0a, 0x06, 0x08, 0x00, 0x10, 0x00, 0x18, 0x00])}];
+					tswpsa[24] = [ { type: 2, data: new Uint8Array([0x0a, 0x06, 0x08, 0x00, 0x10, 0x00, 0x18, 0x00])}];
+
+					var tswpsaid = get_unique_msgid({ deps: [], location: "", type: 2001 }, deps);
+					var tswpsarefs: number[] = [];
+
+					/* add hyperlink if specified */
+					if(rsst.l) {
+						/* create .TSWP.HyperlinkFieldArchive (2032) */
+						var newhlinkid = numbers_add_msg(cfb, 2032, [ [],
+							[],
+							[ { type: 2, data: stru8(rsst.l) } ]
+						], "/Index/Tables/DataList", deps);
+						/* add to smart field table */
+						tswpsa[11] = [];
+						var smartfield: ProtoMessage = [[], []];
+						if(!smartfield[1]) smartfield[1] = [];
+
+						/* TODO: note that this applies one link to the entire text */
+						smartfield[1].push({ type: 2, data: write_shallow([ [],
+							[ { type: 0, data: write_varint49(0) }],
+							[ { type: 2, data: write_TSP_Reference(newhlinkid) }]
+						]) });
+						tswpsa[11][0] = { type: 2, data: write_shallow(smartfield) };
+						tswpsarefs.push(newhlinkid);
+					}
+
+					/* add .TSWP.StorageArchive and object references */
+					numbers_add_msg(cfb, 2001, tswpsa, "/Index/Tables/DataList", deps, tswpsaid);
+					numbers_iwa_doit(cfb, deps, tswpsaid, iwa => {
+						style_indices.forEach(ref => numbers_add_oref(iwa, ref));
+						tswpsarefs.forEach(ref => numbers_add_oref(iwa, ref));
+					});
+
+					/* create .TST.RichTextPayloadArchive (6218) */
+					var rtpaid = numbers_add_msg(cfb, 6218, [ [],
+						[ { type: 2, data: write_TSP_Reference(tswpsaid) }],
+						[],
+						[{ type: 2, data: new Uint8Array([ 13, 255, 255, 255, 0, 18, 10, 16, 255, 255, 1, 24, 255, 255, 255, 255, 7 ]) }],
+					], "/Index/Tables/DataList", deps);
+					numbers_iwa_doit(cfb, deps, rtpaid, iwa => numbers_add_oref(iwa, tswpsaid));
+
+					/* add to rsst */
+					rsstdata[3].push({type: 2, data: write_shallow([ [],
+						[ { type: 0, data: write_varint49(i) } ],
+						[ { type: 0, data: write_varint49(1) } ],
+						[], [], [], [], [], [], // skip fields 3-8
+						[ { type: 2, data: write_TSP_Reference(rtpaid) } ]
+					])});
+					numbers_add_oref(rsstroot, rtpaid);
+
+					/* try to wire up other missing deps */
+					numbers_iwa_doit(cfb, deps, 2, ai => {
+						var mlist = parse_shallow(ai.messages[0].data);
+
+						/* rsst -> rich text payload */
+						numbers_meta_add_dep(mlist, deps, rsstref, rtpaid);
+
+						/* rich text payload -> storage archive */
+						numbers_meta_add_dep(mlist, deps, rtpaid, tswpsaid);
+
+						/* storage archive -> smart fields */
+						numbers_meta_add_dep(mlist, deps, tswpsaid, tswpsarefs);
+						numbers_meta_add_dep(mlist, deps, tswpsaid, style_indices);
+
+						ai.messages[0].data = write_shallow(mlist);
+					});
+				});
+				rsstroot.messages[0].data = write_shallow(rsstdata);
+			});
+
+			/* rebuild comment table */
+			if(LUT.cmnt.length > 1) {
+				/* TODO: verify zahl has a comment storage */
+				var cmntref = parse_TSP_Reference(store[19][0].data);
+				var authors: {[a: string]: number} = {}, iauthor = 0; /* TODO: this should be a Map */
+				numbers_iwa_doit(cfb, deps, cmntref, (cmntroot) => {
+					var cmntdata = parse_shallow(cmntroot.messages[0].data);
+					{
+						cmntdata[3] = [];
+						LUT.cmnt.forEach((cc,i) => {
+							if(i == 0) return;
+							var replies: number[] = [];
+							/* TODO: this assumes one level of replies */
+							if(cc.replies) cc.replies.forEach(c => {
+								/* .TSK.AnnotationAuthorArchive (212) TODO: unify names across book */
+								if(!authors[c.a||""]) authors[c.a||""] = numbers_add_msg(cfb, 212, [ [],
+									[ { type: 2, data: stru8(c.a||"") }],
+									[ { type: 2, data: get_author_color(++iauthor) }],
+									[],
+									[ { type: 0, data: write_varint49(0) } ]
+								], "/Index/Tables/DataList", deps);
+								var aaaid = authors[c.a||""];
+
+								/* .TSD.CommentStorageArchive (3056) */
+								var csaid = numbers_add_msg(cfb, 3056, [ [],
+									[ { type: 2, data: stru8(c.t||"") }],
+									[ { type: 2, data: write_shallow([[],
+										[ { type: 1, data: new Uint8Array([0, 0, 0, 128, 116, 109, 182, 65]) }]
+									]) }],
+									[ { type: 2, data: write_TSP_Reference(aaaid) }]
+								], "/Index/Tables/DataList", deps);
+								numbers_iwa_doit(cfb, deps, csaid, iwa => numbers_add_oref(iwa, aaaid));
+								replies.push(csaid);
+
+								/* meta deps */
+								numbers_iwa_doit(cfb, deps, 2, ai => {
+									var mlist = parse_shallow(ai.messages[0].data);
+
+									/* CSA -> AAA */
+									numbers_meta_add_dep(mlist, deps, csaid, aaaid);
+
+									ai.messages[0].data = write_shallow(mlist);
+								});
+							});
+
+							/* .TSK.AnnotationAuthorArchive (212) TODO: unify names across book */
+							if(!authors[cc.a||""]) authors[cc.a||""] = numbers_add_msg(cfb, 212, [ [],
+								[ { type: 2, data: stru8(cc.a||"") }],
+								[ { type: 2, data: get_author_color(++iauthor) }],
+								[],
+								[ { type: 0, data: write_varint49(0) } ]
+							], "/Index/Tables/DataList", deps);
+							var aaaid = authors[cc.a||""];
+
+							/* .TSD.CommentStorageArchive (3056) */
+							var csaid = numbers_add_msg(cfb, 3056, [ [],
+								[ { type: 2, data: stru8(cc.t||"") }],
+								[ { type: 2, data: write_shallow([[],
+									[ { type: 1, data: new Uint8Array([0, 0, 0, 128, 116, 109, 182, 65]) }]
+								]) }],
+								[ { type: 2, data: write_TSP_Reference(aaaid) }],
+								replies.map(r => ({type: 2, data: write_TSP_Reference(r)})),
+								[ { type: 2, data: write_shallow([[],
+									[ { type: 0, data: write_varint49(i) }],
+									[ { type: 0, data: write_varint49(0) }]
+								]) }],
+							], "/Index/Tables/DataList", deps);
+							numbers_iwa_doit(cfb, deps, csaid, iwa => {
+								numbers_add_oref(iwa, aaaid);
+								replies.forEach(r => numbers_add_oref(iwa, r));
+							});
+
+							/* add to TableDataList */
+							cmntdata[3].push({type: 2, data: write_shallow([ [],
+								[ { type: 0, data: write_varint49(i) } ],
+								[ { type: 0, data: write_varint49(1) } ],
+								[], [], [], [], [], [], [], // skip fields 3-9
+								[ { type: 2, data: write_TSP_Reference(csaid) } ]
+							])});
+							numbers_add_oref(cmntroot, csaid);
+
+							/* meta deps */
+							numbers_iwa_doit(cfb, deps, 2, ai => {
+								var mlist = parse_shallow(ai.messages[0].data);
+								numbers_meta_add_dep(mlist, deps, cmntref, csaid); //  table -> CSA
+								numbers_meta_add_dep(mlist, deps, csaid, aaaid); // CSA -> author
+								if(replies.length) numbers_meta_add_dep(mlist, deps, csaid, replies); // CSA -> replies
+								ai.messages[0].data = write_shallow(mlist);
+							});
+
+						});
+					}
+					cmntdata[2][0].data = write_varint49(LUT.cmnt.length + 1);
+					cmntroot.messages[0].data = write_shallow(cmntdata);
+				});
+			}
 		}
 		pb[4][0].data = write_shallow(store);
 	}

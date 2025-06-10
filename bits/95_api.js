@@ -9,6 +9,7 @@ var utils/*:any*/ = {
 	decode_cell: decode_cell,
 	decode_range: decode_range,
 	format_cell: format_cell,
+	sheet_new: sheet_new,
 	sheet_add_aoa: sheet_add_aoa,
 	sheet_add_json: sheet_add_json,
 	sheet_add_dom: sheet_add_dom,

@@ -64,6 +64,7 @@ function write_comments_xml(data/*::, opts*/) {
 				o.push('</text></comment>');
 			});
 		} else {
+			if(d[1][0] && d[1][0].T && d[1][0].ID) lastauthor = iauthor.indexOf("tc=" + d[1][0].ID);
 			/* based on Threaded Comments -> Comments projection */
 			o.push('<comment ref="' + d[0] + '" authorId="' + lastauthor + '"><text>');
 			var t = "Comment:\n    " + (ts[0]) + "\n";

@@ -41,12 +41,13 @@ function write_BrtRowHdr(R/*:number*/, range, ws) {
 	o.l += 4;
 
 	var caddr = {r:R, c:0};
+	var dense = ws["!data"] != null;
 	for(var i = 0; i < 16; ++i) {
 		if((range.s.c > ((i+1) << 10)) || (range.e.c < (i << 10))) continue;
 		var first = -1, last = -1;
 		for(var j = (i<<10); j < ((i+1)<<10); ++j) {
 			caddr.c = j;
-			var cell = Array.isArray(ws) ? (ws[caddr.r]||[])[caddr.c] : ws[encode_cell(caddr)];
+			var cell = dense ? (ws["!data"][caddr.r]||[])[caddr.c] : ws[encode_cell(caddr)];
 			if(cell) { if(first < 0) first = j; last = j; }
 		}
 		if(first < 0) continue;
@@ -510,7 +511,7 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 	var opts = _opts || {};
 	if(!rels) rels = {'!id':{}};
 	if(DENSE != null && opts.dense == null) opts.dense = DENSE;
-	var s/*:Worksheet*/ = (opts.dense ? [] : {});
+	var s/*:Worksheet*/ = ({}); if(opts.dense) s["!data"] = [];
 
 	var ref;
 	var refguess = {s: {r:2000000, c:2000000}, e: {r:0, c:0} };
@@ -541,6 +542,7 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 	XLSBRecordEnum[0x0010] = { n:"BrtShortReal", f:parse_BrtShortReal };
 
 	var cm, vm;
+	var date1904 = 1462 * +!!((wb||{}).WBProps||{}).date1904;
 
 	recordhopper(data, function ws_parse(val, RR, RT) {
 		if(end) return;
@@ -584,9 +586,9 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 					case 'str': p.t = 's'; p.v = val[1]; break;
 					case 'is': p.t = 's'; p.v = val[1].t; break;
 				}
-				if((cf = styles.CellXf[val[0].iStyleRef])) safe_format(p,cf.numFmtId,null,opts, themes, styles);
+				if((cf = styles.CellXf[val[0].iStyleRef])) safe_format(p,cf.numFmtId,null,opts, themes, styles, date1904>0);
 				C = val[0].c == -1 ? C + 1 : val[0].c;
-				if(opts.dense) { if(!s[R]) s[R] = []; s[R][C] = p; }
+				if(opts.dense) { if(!s["!data"][R]) s["!data"][R] = []; s["!data"][R][C] = p; }
 				else s[encode_col(C) + rr] = p;
 				if(opts.cellFormula) {
 					af = false;
@@ -605,7 +607,7 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 				if(refguess.e.r < row.r) refguess.e.r = row.r;
 				if(refguess.e.c < C) refguess.e.c = C;
 				if(opts.cellDates && cf && p.t == 'n' && fmt_is_date(table_fmt[cf.numFmtId])) {
-					var _d = SSF_parse_date_code(p.v); if(_d) { p.t = 'd'; p.v = new Date(_d.y, _d.m-1,_d.d,_d.H,_d.M,_d.S,_d.u); }
+					var _d = SSF_parse_date_code(p.v + date1904); if(_d) { p.t = 'd'; p.v = new Date(Date.UTC(_d.y, _d.m-1,_d.d,_d.H,_d.M,_d.S,_d.u)); }
 				}
 				if(cm) {
 					if(cm.type == 'XLDAPR') p.D = true;
@@ -619,7 +621,7 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 				if(!opts.sheetStubs || pass) break;
 				p = ({t:'z',v:void 0}/*:any*/);
 				C = val[0].c == -1 ? C + 1 : val[0].c;
-				if(opts.dense) { if(!s[R]) s[R] = []; s[R][C] = p; }
+				if(opts.dense) { if(!s["!data"][R]) s["!data"][R] = []; s["!data"][R][C] = p; }
 				else s[encode_col(C) + rr] = p;
 				if(refguess.s.r > row.r) refguess.s.r = row.r;
 				if(refguess.s.c > C) refguess.s.c = C;
@@ -650,11 +652,11 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 				}
 				for(R=val.rfx.s.r;R<=val.rfx.e.r;++R) for(C=val.rfx.s.c;C<=val.rfx.e.c;++C) {
 					if(opts.dense) {
-						if(!s[R]) s[R] = [];
-						if(!s[R][C]) s[R][C] = {t:'z',v:undefined};
-						s[R][C].l = val;
+						if(!s["!data"][R]) s["!data"][R] = [];
+						if(!s["!data"][R][C]) s["!data"][R][C] = {t:'z',v:undefined};
+						s["!data"][R][C].l = val;
 					} else {
-						addr = encode_cell({c:C,r:R});
+						addr = encode_col(C) + encode_row(R);
 						if(!s[addr]) s[addr] = {t:'z',v:undefined};
 						s[addr].l = val;
 					}
@@ -664,14 +666,14 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 			case 0x01AA: /* 'BrtArrFmla' */
 				if(!opts.cellFormula) break;
 				arrayf.push(val);
-				cell = ((opts.dense ? s[R][C] : s[encode_col(C) + rr])/*:any*/);
+				cell = ((opts.dense ? s["!data"][R][C] : s[encode_col(C) + rr])/*:any*/);
 				cell.f = stringify_formula(val[1], refguess, {r:row.r, c:C}, supbooks, opts);
 				cell.F = encode_range(val[0]);
 				break;
 			case 0x01AB: /* 'BrtShrFmla' */
 				if(!opts.cellFormula) break;
 				sharedf[encode_cell(val[0].s)] = val[1];
-				cell = (opts.dense ? s[R][C] : s[encode_col(C) + rr]);
+				cell = (opts.dense ? s["!data"][R][C] : s[encode_col(C) + rr]);
 				cell.f = stringify_formula(val[1], refguess, {r:row.r, c:C}, supbooks, opts);
 				break;
 
@@ -683,6 +685,10 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 					if(!seencol) { seencol = true; find_mdw_colw(val.w/256); }
 					process_col(colinfo[val.e+1]);
 				}
+				break;
+
+			case 0x0227: /* 'BrtLegacyDrawing' */
+				if(val) s["!legrel"] = val;
 				break;
 
 			case 0x00A1: /* 'BrtBeginAFilter' */
@@ -741,7 +747,6 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 			case 0x0499: /* 'BrtFilter14' */
 			case 0x00A9: /* 'BrtIconFilter' */
 			case 0x049D: /* 'BrtIconFilter14' */
-			case 0x0227: /* 'BrtLegacyDrawing' */
 			case 0x0228: /* 'BrtLegacyDrawingHF' */
 			case 0x0295: /* 'BrtListPart' */
 			case 0x027F: /* 'BrtOleObject' */
@@ -800,11 +805,12 @@ function parse_ws_bin(data, _opts, idx, rels, wb/*:WBWBProps*/, themes, styles)/
 	if(merges.length > 0) s["!merges"] = merges;
 	if(colinfo.length > 0) s["!cols"] = colinfo;
 	if(rowinfo.length > 0) s["!rows"] = rowinfo;
+	if(rels['!id'][s['!legrel']]) s['!legdrawel'] = rels['!id'][s['!legrel']];
 	return s;
 }
 
 /* TODO: something useful -- this is a stub */
-function write_ws_bin_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:number*/, opts, ws/*:Worksheet*/, last_seen/*:boolean*/)/*:boolean*/ {
+function write_ws_bin_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:number*/, opts, ws/*:Worksheet*/, last_seen/*:boolean*/, date1904/*:boolean*/)/*:boolean*/ {
 	var o/*:any*/ = ({r:R, c:C}/*:any*/);
 	if(cell.c) ws['!comments'].push([encode_cell(o), cell.c]);
 	if(cell.v === undefined) return false;
@@ -814,7 +820,7 @@ function write_ws_bin_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:num
 		case 'd': // no BrtCellDate :(
 			cell = dup(cell);
 			cell.z = cell.z || table_fmt[14];
-			cell.v = datenum(parseDate(cell.v)); cell.t = 'n';
+			cell.v = datenum(parseDate(cell.v, date1904), date1904); cell.t = 'n';
 			break;
 		/* falls through */
 		case 'n': case 'e': vv = ''+cell.v; break;
@@ -841,6 +847,12 @@ function write_ws_bin_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:num
 			if(cell.v == (cell.v | 0) && cell.v > -1000 && cell.v < 1000) {
 				if(last_seen) write_record(ba, 0x000D /* BrtShortRk */, write_BrtShortRk(cell, o));
 				else write_record(ba, 0x0002 /* BrtCellRk */, write_BrtCellRk(cell, o));
+			} else if(isNaN(cell.v)) {
+				if(last_seen) write_record(ba, 0x000E /* BrtShortError */, write_BrtShortError({t:"e", v: 0x24}, o)); // #NUM!
+				else write_record(ba, 0x0003 /* BrtCellError */, write_BrtCellError({t:"e", v: 0x24}, o)); // #NUM!
+			} else if(!isFinite(cell.v)) {
+				if(last_seen) write_record(ba, 0x000E /* BrtShortError */, write_BrtShortError({t:"e", v: 0x07}, o)); // #DIV/0!
+				else write_record(ba, 0x0003 /* BrtCellError */, write_BrtCellError({t:"e", v: 0x07}, o)); // #DIV/0!
 			} else {
 				if(last_seen) write_record(ba, 0x0010 /* BrtShortReal */, write_BrtShortReal(cell, o));
 				else write_record(ba, 0x0005 /* BrtCellReal */, write_BrtCellReal(cell, o));
@@ -861,10 +873,11 @@ function write_ws_bin_cell(ba/*:BufArray*/, cell/*:Cell*/, R/*:number*/, C/*:num
 	return true;
 }
 
-function write_CELLTABLE(ba, ws/*:Worksheet*/, idx/*:number*/, opts/*::, wb:Workbook*/) {
+function write_CELLTABLE(ba, ws/*:Worksheet*/, idx/*:number*/, opts, wb/*:Workbook*/) {
 	var range = safe_decode_range(ws['!ref'] || "A1"), ref, rr = "", cols/*:Array<string>*/ = [];
+	var date1904 = (((wb||{}).Workbook||{}).WBProps||{}).date1904;
 	write_record(ba, 0x0091 /* BrtBeginSheetData */);
-	var dense = Array.isArray(ws);
+	var dense = ws["!data"] != null;
 	var cap = range.e.r;
 	if(ws['!rows']) cap = Math.max(range.e.r, ws['!rows'].length - 1);
 	for(var R = range.s.r; R <= cap; ++R) {
@@ -877,10 +890,10 @@ function write_CELLTABLE(ba, ws/*:Worksheet*/, idx/*:number*/, opts/*::, wb:Work
 			/* *16384CELL */
 			if(R === range.s.r) cols[C] = encode_col(C);
 			ref = cols[C] + rr;
-			var cell = dense ? (ws[R]||[])[C] : ws[ref];
+			var cell = dense ? (ws["!data"][R]||[])[C] : ws[ref];
 			if(!cell) { last_seen = false; continue; }
 			/* write cell */
-			last_seen = write_ws_bin_cell(ba, cell, R, C, opts, ws, last_seen);
+			last_seen = write_ws_bin_cell(ba, cell, R, C, opts, ws, last_seen, date1904);
 		}
 	}
 	write_record(ba, 0x0092 /* BrtEndSheetData */);

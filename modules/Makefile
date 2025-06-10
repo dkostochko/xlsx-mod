@@ -4,10 +4,14 @@ TSFILES=$(wildcard *.ts)
 ENTRIES=$(subst .ts,.js,$(TSFILES))
 CC=esbuild@0.14.14
 
-BAREJS=04_base64.js 45_rtf.js 51_xlsxmeta.js 51_xlsbmeta.js 59_vba.js 64_ftab.js 83_numbers.js
+BAREJS=04_base64.js 32_odmanrdf.js 45_rtf.js 51_xlsxmeta.js 51_xlsbmeta.js 59_vba.js 64_ftab.js 83_numbers.js
 
 .PHONY: all
 all: bits xlsx.zahl.js
+
+.PHONY: lint
+lint: $(filter-out $(wildcard *.node.ts),$(TSFILES))
+	tsc --strict --noEmit $^
 
 .PHONY: bits
 bits: $(ENTRIES)

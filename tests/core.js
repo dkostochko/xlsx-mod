@@ -54,7 +54,7 @@ if(!browser) {
 	for(var _fileAi = 0; _fileAi < _fileA.length; ++_fileAi) if(test_file(_fileA[_fileAi])) fileA.push(_fileA[_fileAi]);
 }
 
-var can_write_numbers = typeof Set !== "undefined" && typeof Array.prototype.findIndex == "function" && typeof Uint8Array !== "undefined" && typeof Uint8Array.prototype.indexOf == "function";
+var can_write_numbers = typeof Array.prototype.findIndex == "function" && typeof Uint8Array !== "undefined" && typeof Uint8Array.prototype.indexOf == "function";
 
 /* Excel enforces 31 character sheet limit, although technical file limit is 255 */
 function fixsheetname(x/*:string*/)/*:string*/ { return x.substr(0,31); }
@@ -367,13 +367,13 @@ if(!browser) describe('should parse test files', function() {
 });
 
 function get_cell(ws/*:Worksheet*/, addr/*:string*/) {
-	if(!Array.isArray(ws)) return ws[addr];
+	if(!ws["!data"]) return ws[addr];
 	var a = X.utils.decode_cell(addr);
-	return (ws[a.r]||[])[a.c];
+	return (ws["!data"][a.r]||[])[a.c];
 }
 
 function each_cell(ws, f) {
-	if(Array.isArray(ws)) ws.forEach(function(row) { if(row) row.forEach(f); });
+	if(ws["!data"]) ws["!data"].forEach(function(row) { if(row) row.forEach(f); });
 	else Object.keys(ws).forEach(function(addr) { if(addr[0] === "!" || !ws.hasOwnProperty(addr)) return; f(ws[addr]); });
 }
 
@@ -1023,10 +1023,14 @@ describe('parse features', function() {
 	});
 
 	describe('column properties', function() {
-		var wbs = [], wbs_no_slk = [];
+		var wbs = [], wbs_no_slk = [], ols = [];
+		var ol = fs.existsSync(paths.olxls);
 		var bef = (function() {
 			wbs = CWPaths.map(function(n) { return X.read(fs.readFileSync(n), {type:TYPE, cellStyles:true}); });
 			wbs_no_slk = wbs.slice(0, 5);
+			/* */
+			if(!ol) return;
+			ols = OLPaths.map(function(p) { return X.read(fs.readFileSync(p), {type:TYPE, cellStyles:true}); });
 		});
 		if(typeof before != 'undefined') before(bef);
 		else it('before', bef);
@@ -1059,6 +1063,22 @@ describe('parse features', function() {
 				assert.equal(x[5].wpx, 53);
 				assert.equal(x[6].wpx, 77);
 				assert.equal(x[7].wpx, 101);
+			});
+		});
+		it('should have correct outline levels', function() {
+			ols.map(function(x) { return x.Sheets["Sheet1"]; }).forEach(function(ws) {
+				var cols = ws['!cols'];
+				if(!cols) return; // TODO: ODS!!!
+				for(var i = 0; i < 29; ++i) {
+					var cell = get_cell(ws, X.utils.encode_col(i) + "1");
+					var lvl = (cols[i]||{}).level||0;
+					if(!cell || cell.t == 's') assert.equal(lvl, 0);
+					else if(cell.t == 'n') {
+						if(cell.v === 0) assert.equal(lvl, 0);
+						else assert.equal(lvl, cell.v);
+					}
+				}
+				assert.equal(cols[29].level, 7);
 			});
 		});
 	});
@@ -1402,13 +1422,16 @@ describe('parse features', function() {
 	].forEach(function(m) { it(m[0], function() {
 		var wb = X.read(fs.readFileSync(m[1]), {type: TYPE, cellDates: true});
 		var ws = wb.Sheets[wb.SheetNames[0]];
-		var data = X.utils.sheet_to_json(ws, { header: 1, raw: true, rawNumbers: false });
-		assert.ok(data[0][1] instanceof Date);
-		assert.ok(data[1][1] instanceof Date);
-		assert.equal(data[2][1], '$123.00');
-		assert.equal(data[3][1], '98.76%');
-		assert.equal(data[4][1], '456.00');
-		assert.equal(data[5][1], '7,890');
+		var data1 = X.utils.sheet_to_json(ws, { header: 1, raw: true, rawNumbers: false });
+		var data2 = X.utils.sheet_to_json(ws, { header: 1, raw: false, rawNumbers: true });
+		assert.ok(data1[0][1] instanceof Date);
+		assert.ok(data1[1][1] instanceof Date);
+		assert.equal(data1[2][1], '$123.00');
+		assert.equal(data1[3][1], '98.76%');
+		assert.equal(data1[4][1], '456.00');
+		assert.equal(data1[5][1], '7,890');
+		assert.equal(data2[0][1], '7/23/2020');
+		assert.equal(data2[5][1], 7890);
 	}); }); });
 
 	it('date system', function() {[
@@ -1549,11 +1572,12 @@ describe('write features', function() {
 	it('should handle non-string values for "s" cells', function() {[
 		"xlsx", "xlsb", "xls", "biff5", "biff2", "xlml", "numbers", "ods", "fods", "wk3", "csv", "txt", "sylk", "html", "dif", "dbf", "wk1", "rtf", "prn"
 	].forEach(function(fmt) {
+		if(fmt == "numbers" && !can_write_numbers) return;
 		var ws = X.utils.aoa_to_sheet([
 			["String", "123"],
 			["Number", 123],
 			["Boolean", true],
-			["Date", new Date()],
+			["Date", new Date()]
 		], { cellDates: true });
 		ws["B2"].t = ws["B3"].t = ws["B4"].t = "s"
 		var wb = X.utils.book_new();
@@ -1570,28 +1594,30 @@ function seq(end/*:number*/, start/*:?number*/)/*:Array<number>*/ {
 	return o;
 }
 
-var basedate = new Date(1899, 11, 30, 0, 0, 0); // 2209161600000
+var dnthresh  = /*#__PURE__*/Date.UTC(1899, 11, 30, 0, 0, 0); // -2209161600000
+var dnthresh1 = /*#__PURE__*/Date.UTC(1899, 11, 31, 0, 0, 0); // -2209075200000
+var dnthresh2 = /*#__PURE__*/Date.UTC(1904, 0, 1, 0, 0, 0); // -2209075200000
 function datenum(v/*:Date*/, date1904/*:?boolean*/)/*:number*/ {
-	var epoch = v.getTime();
-	if(date1904) epoch -= 1462*24*60*60*1000;
-	var dnthresh = basedate.getTime() + (v.getTimezoneOffset() - basedate.getTimezoneOffset()) * 60000;
-	return (epoch - dnthresh) / (24 * 60 * 60 * 1000);
+	var epoch = /*#__PURE__*/v.getTime();
+	var res = (epoch - dnthresh) / (24 * 60 * 60 * 1000);
+	if(date1904) return res - 1462;
+	return res < 60 ? res - 1 : res;
 }
-var good_pd_date = new Date('2017-02-19T19:06:09.000Z');
-if(isNaN(good_pd_date.getFullYear())) good_pd_date = new Date('2017-02-19T19:06:09');
-if(isNaN(good_pd_date.getFullYear())) good_pd_date = new Date('2/19/17');
-var good_pd = good_pd_date.getFullYear() == 2017;
-function parseDate(str/*:string|Date*/)/*:Date*/ {
-	var d = new Date(str);
-	if(good_pd) return d;
+/* Blame https://bugs.chromium.org/p/v8/issues/detail?id=7863 for the regexide */
+var pdre1 = /^(\d+):(\d+)(:\d+)?(\.\d+)?$/; // HH:MM[:SS[.UUU]]
+var pdre2 = /^(\d+)-(\d+)-(\d+)$/; // YYYY-mm-dd
+var pdre3 = /^(\d+)-(\d+)-(\d+)[T ](\d+):(\d+)(:\d+)?(\.\d+)?$/; // YYYY-mm-dd(T or space)HH:MM[:SS[.UUU]] sans "Z"
+/* parses a date string as a UTC date */
+function parseDate(str/*:string*/, date1904/*:boolean*/)/*:Date*/ {
 	if(str instanceof Date) return str;
-	if(good_pd_date.getFullYear() == 1917 && !isNaN(d.getFullYear())) {
-		var s = d.getFullYear();
-		if(str.indexOf("" + s) > -1) return d;
-		d.setFullYear(d.getFullYear() + 100); return d;
-	}
-	var n = str.match(/\d+/g)||["2017","2","19","0","0","0"];
-	return new Date(Date.UTC(+n[0], +n[1] - 1, +n[2], +n[3], +n[4], +n[5]));
+	var m = str.match(pdre1);
+	if(m) return new Date((date1904 ? dnthresh2 : dnthresh1) + ((parseInt(m[1], 10)*60 + parseInt(m[2], 10))*60 + (m[3] ? parseInt(m[3].slice(1), 10) : 0))*1000 + (m[4] ? parseInt((m[4]+"000").slice(1,4), 10) : 0));
+	m = str.match(pdre2);
+	if(m) return new Date(Date.UTC(+m[1], +m[2]-1, +m[3], 0, 0, 0, 0));
+	m = str.match(pdre3);
+	if(m) return new Date(Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], ((m[6] && parseInt(m[6].slice(1), 10))|| 0), ((m[7] && parseInt(m[7].slice(1), 10))||0)));
+	var d = new Date(str);
+	return d;
 }
 
 var fixdate = browser ? parseDate("2014-02-19T14:30:00.000Z") : new Date("2014-02-19T14:30Z");
@@ -1815,7 +1841,7 @@ describe('roundtrip features', function() {
 		];
 		var o = X.utils.sheet_to_json(X.utils.json_to_sheet(data, {cellDates:true}));
 		data.forEach(function(row, i) {
-			Object.keys(row).forEach(function(k) { assert.equal(row[k], o[i][k]); });
+			Object.keys(row).forEach(function(k) { assert.equal(row[k].valueOf(), o[i][k].valueOf()); });
 		});
 	});
 
@@ -1901,6 +1927,21 @@ describe('invalid files', function() {
 			var wb = X.read(fs.readFileSync(paths.fstxlsx), {type:TYPE});
 			wb.SheetNames.push(wb.SheetNames[0]);
 			assert.throws(function() { X.write(wb, {type:'binary'}); });
+		});
+		it('should fail if sheet name is not valid', function() {
+			var names = [
+				"", // cannot be blank
+				"abcdefghijklmnopqrstuvwxyz1234567890", // cannot exceed 31 chars
+				"'sheetjs", "sheetjs'", // cannot start or end with apostrophe
+				"History", // cannot be History
+				"Sheet:JS", "Sheet]JS", "Sheet[JS", "Sheet*JS", // bad characters
+				"Sheet?JS", "Sheet\\JS", "Sheet\/JS"
+			];
+			names.forEach(function(n) { assert.throws(function() {
+				var wb = { SheetNames: [n], Sheets: {} };
+				wb.Sheets[n] = X.utils.aoa_to_sheet([["SheetJS"]]);
+				X.write(wb, {type:"binary", bookType:"xlsx"});
+			}); });
 		});
 	});
 });
@@ -2107,6 +2148,15 @@ describe('json output', function() {
 			}
 		});
 	});
+	it('should force UTC in formatted strings', function() {
+		var ws =  { "!ref": "A1", "A1": { t: 'd', v: new Date(Date.UTC(2002, 11, 24, 0, 0, 0, 0)) } };
+		assert.equal(X.utils.sheet_to_json(ws, {header: 1, UTC: true, raw: false, dateNF: 'd"/"m"/"yyyy'})[0][0], "24/12/2002");
+		delete ws.A1.w;
+		assert.equal(X.utils.sheet_to_json(ws, {header: 1, UTC: false, raw: false, dateNF: 'd"/"m"/"yyyy'})[0][0], "24/12/2002");
+
+		assert.equal(X.utils.sheet_to_json(ws, {header: 1, UTC: true, raw: true, dateNF: 'd"/"m"/"yyyy'})[0][0].valueOf(), 1040688000000);
+		assert.equal(X.utils.sheet_to_json(ws, {header: 1, UTC: false, raw: true, dateNF: 'd"/"m"/"yyyy'})[0][0].valueOf(), 1040688000000 + new Date("2002-12-24T00:00:00.000Z").getTimezoneOffset()*60000);
+	});
 });
 
 
@@ -2173,7 +2223,15 @@ describe('CSV', function() {
 			assert.equal(cell.w, '2/19/14');
 		});
 		it('should honor dateNF override', function() {
-			var opts = ({type:"binary", dateNF:"YYYY-MM-DD"}/*:any*/);
+			var opts = ({type:"binary", dateNF:"YYYY-MM-DD", cellNF: true}/*:any*/);
+			var cell = get_cell(X.read(b, opts).Sheets["Sheet1"], "C3");
+			/* NOTE: IE interprets 2-digit years as 19xx */
+			assert.ok(cell.w == '2014-02-19' || cell.w == '1914-02-19' || cell.w == "2/19/14");
+			assert.equal(cell.z, "YYYY-MM-DD");
+			opts.cellDates = true; opts.dateNF = "YY-MM-DD";
+			cell = get_cell(X.read(b, opts).Sheets["Sheet1"], "C3");
+			assert.ok(cell.w == '14-02-19' || cell.w == "2/19/14");
+			var opts = ({type:"binary", dateNF:"YYYY-MM-DD", UTC: true}/*:any*/);
 			var cell = get_cell(X.read(b, opts).Sheets["Sheet1"], "C3");
 			/* NOTE: IE interprets 2-digit years as 19xx */
 			assert.ok(cell.w == '2014-02-19' || cell.w == '1914-02-19');
@@ -2187,9 +2245,17 @@ describe('CSV', function() {
 			var cell = get_cell(X.read(bb, opts).Sheets["Sheet1"], "C3");
 			assert.equal(cell.v.getMonth(), 1);
 			assert.equal(cell.w, "2/3/14");
-			opts = {type:"binary", cellDates:true, dateNF:'d/m/yy'};
+			opts.dateNF = 'd/m/yy';
 			cell = get_cell(X.read(bb, opts).Sheets["Sheet1"], "C3");
 			assert.equal(cell.v.getMonth(), 2);
+			assert.equal(cell.w, "2/3/14");
+			opts = {type:"binary", cellDates:true, dateNF:'m/d/yy', UTC: true};
+			cell = get_cell(X.read(bb, opts).Sheets["Sheet1"], "C3");
+			assert.equal(cell.v.getUTCMonth(), 1);
+			assert.equal(cell.w, "2/3/14");
+			opts.dateNF = 'd/m/yy';
+			cell = get_cell(X.read(bb, opts).Sheets["Sheet1"], "C3");
+			assert.equal(cell.v.getUTCMonth(), 2);
 			assert.equal(cell.w, "2/3/14");
 		});
 		it('should interpret values by default', function() { plaintext_test(X.read(csv_bstr, {type:"binary"}), false); });
@@ -2220,7 +2286,8 @@ describe('CSV', function() {
 				["3b", "3 b", "3 b-1"],
 				["3p", "3 P", "3 p-1"]
 			];
-			var ws = X.read(aoa.map(function(row) { return row.join(","); }).join("\n"), {type: "string", cellDates: true}).Sheets.Sheet1;
+
+			var ws = X.read(aoa.map(function(row) { return row.join(","); }).join("\n"), {type: "string", cellDates: true, UTC: false}).Sheets.Sheet1;
 			for(var R = 0; R < 3; ++R) {
 				assert.equal(get_cell(ws, "A" + (R+1)).v, aoa[R][0]);
 				assert.equal(get_cell(ws, "C" + (R+1)).v, aoa[R][2]);
@@ -2228,14 +2295,46 @@ describe('CSV', function() {
 			assert.equal(get_cell(ws, "B2").v, "3 b");
 			var B1 = get_cell(ws, "B1"); assert.equal(B1.t, "d"); assert.equal(B1.v.getHours(), 3);
 			var B3 = get_cell(ws, "B3"); assert.equal(B3.t, "d"); assert.equal(B3.v.getHours(), 15);
+			ws = X.read(aoa.map(function(row) { return row.join(","); }).join("\n"), {type: "string", cellDates: false, UTC: false}).Sheets.Sheet1;
+			for(var R = 0; R < 3; ++R) {
+				assert.equal(get_cell(ws, "A" + (R+1)).v, aoa[R][0]);
+				assert.equal(get_cell(ws, "C" + (R+1)).v, aoa[R][2]);
+			}
+			assert.equal(get_cell(ws, "B2").v, "3 b");
+
+			ws = X.read(aoa.map(function(row) { return row.join(","); }).join("\n"), {type: "string", cellDates: true, UTC: true}).Sheets.Sheet1;
+			for(var R = 0; R < 3; ++R) {
+				assert.equal(get_cell(ws, "A" + (R+1)).v, aoa[R][0]);
+				assert.equal(get_cell(ws, "C" + (R+1)).v, aoa[R][2]);
+			}
+			assert.equal(get_cell(ws, "B2").v, "3 b");
+			B1 = get_cell(ws, "B1"); assert.equal(B1.t, "d"); assert.equal(B1.v.getUTCHours(), 3);
+			B3 = get_cell(ws, "B3"); assert.equal(B3.t, "d"); assert.equal(B3.v.getUTCHours(), 15);
+			ws = X.read(aoa.map(function(row) { return row.join(","); }).join("\n"), {type: "string", cellDates: false, UTC: true}).Sheets.Sheet1;
+			for(var R = 0; R < 3; ++R) {
+				assert.equal(get_cell(ws, "A" + (R+1)).v, aoa[R][0]);
+				assert.equal(get_cell(ws, "C" + (R+1)).v, aoa[R][2]);
+			}
+			assert.equal(get_cell(ws, "B2").v, "3 b");
+			B1 = get_cell(ws, "B1"); assert.equal(B1.t, "n"); assert.equal(B1.v * 24, 3);
+			B3 = get_cell(ws, "B3"); assert.equal(B3.t, "n"); assert.equal(B3.v * 24, 15);
+
+			ws = X.read(aoa.map(function(row) { return row.join(","); }).join("\n"), {type: "string", cellDates: true}).Sheets.Sheet1;
+			for(var R = 0; R < 3; ++R) {
+				assert.equal(get_cell(ws, "A" + (R+1)).v, aoa[R][0]);
+				assert.equal(get_cell(ws, "C" + (R+1)).v, aoa[R][2]);
+			}
+			assert.equal(get_cell(ws, "B2").v, "3 b");
+			B1 = get_cell(ws, "B1"); assert.equal(B1.t, "d"); assert.equal(B1.v.getUTCHours(), 3);
+			B3 = get_cell(ws, "B3"); assert.equal(B3.t, "d"); assert.equal(B3.v.getUTCHours(), 15);
 			ws = X.read(aoa.map(function(row) { return row.join(","); }).join("\n"), {type: "string", cellDates: false}).Sheets.Sheet1;
 			for(var R = 0; R < 3; ++R) {
 				assert.equal(get_cell(ws, "A" + (R+1)).v, aoa[R][0]);
 				assert.equal(get_cell(ws, "C" + (R+1)).v, aoa[R][2]);
 			}
 			assert.equal(get_cell(ws, "B2").v, "3 b");
-			var B1 = get_cell(ws, "B1"); assert.equal(B1.t, "n"); assert.equal(B1.v * 24, 3);
-			var B3 = get_cell(ws, "B3"); assert.equal(B3.t, "n"); assert.equal(B3.v * 24, 15);
+			B1 = get_cell(ws, "B1"); assert.equal(B1.t, "n"); assert.equal(B1.v * 24, 3);
+			B3 = get_cell(ws, "B3"); assert.equal(B3.t, "n"); assert.equal(B3.v * 24, 15);
 
 		});
 	});
@@ -2386,19 +2485,33 @@ describe('dbf', function() {
 		['d11',  dir + 'dbf/d11.dbf'],
 		['vfp3', dir + 'dbf/vfp3.dbf']
 	]/*:any*/);
+	var wbsfalse = ([]);
+	var wbstrue = ([]);
 	var bef = (function() {
-		wbs = wbs.map(function(x) { return [x[0], X.read(fs.readFileSync(x[1]), {type:TYPE})]; });
+		wbsfalse = wbs.map(function(x) { return [x[0], X.read(fs.readFileSync(x[1]), { type:TYPE, cellDates: false })]; });
+		wbstrue  = wbs.map(function(x) { return [x[0], X.read(fs.readFileSync(x[1]), { type:TYPE, cellDates: true })]; });
 	});
 	if(typeof before != 'undefined') before(bef);
 	else it('before', bef);
 	it(wbs[1][0], function() {
-		var ws = wbs[1][1].Sheets["Sheet1"];
+		var wsfalse = wbsfalse[1][1].Sheets["Sheet1"];
 		[
 			["A1", "v", "CHAR10"], ["A2", "v", "test1"], ["B2", "v", 123.45],
-			["C2", "v", 12.345], ["D2", "v", 1234.1], ["E2", "w", "19170219"],
-			/* [F2", "w", "19170219"], */ ["G2", "v", 1231.4], ["H2", "v", 123234],
+			["C2", "v", 12.345], ["D2", "v", 1234.1],
+			["E2", "v", 6260], ["E2", "w", "19170219"],
+			["F2", "v", 6260], ["F2", "w", "19170219"],
+			["G2", "v", 1231.4], ["H2", "v", 123234],
 			["I2", "v", true], ["L2", "v", "SheetJS"]
-		].forEach(function(r) { assert.equal(get_cell(ws, r[0])[r[1]], r[2]); });
+		].forEach(function(r) {
+			assert.equal(get_cell(wsfalse, r[0])[r[1]], r[2]);
+		});
+		var wstrue = wbstrue[1][1].Sheets["Sheet1"];
+		[
+			["E2", "v", Date.UTC(1917,1,19,0,0,0,0)], ["E2", "w", "19170219"],
+			["F2", "v", Date.UTC(1917,1,19,0,0,0,0)], ["F2", "w", "19170219"]
+		].forEach(function(r) {
+			assert.equal(get_cell(wstrue, r[0])[r[1]].valueOf(), r[2].valueOf());
+		});
 	});
 	if(!browser || typeof cptable !== 'undefined') it("Ś╫êëτ⌡ś and Š╫ěéτ⌡š", function() {
 		[ [620, "Ś╫êëτ⌡ś"], [895, "Š╫ěéτ⌡š"] ].forEach(function(r) {
@@ -2611,6 +2724,75 @@ describe('rtf', function() {
 		assert.equal(rtf1, rtf2);
 	});
 });
+
+describe('dense mode', function() {
+	it('sheet_new', function() {
+		var sp = X.utils.sheet_new(); assert.ok(!sp["!data"]);
+		sp = X.utils.sheet_new({}); assert.ok(!sp["!data"]);
+		sp = X.utils.sheet_new({dense: false}); assert.ok(!sp["!data"]);
+		sp = X.utils.sheet_new({dense: true}); assert.ok(!!sp["!data"]);
+	});
+
+	it('read', function() {
+		ILPaths.forEach(function(p) {
+			var wb = X.read(fs.readFileSync(p), {type: TYPE, WTF: true});
+			var ws = wb.Sheets[wb.SheetNames[0]];
+			assert.equal(ws["A1"].v, "Link to Sheet2");
+			assert.ok(!ws["!data"]);
+
+			wb = X.read(fs.readFileSync(p), {type: TYPE, WTF: true, dense: true});
+			ws = wb.Sheets[wb.SheetNames[0]];
+			assert.ok(!ws["A1"]);
+			assert.equal(ws["!data"][0][0].v, "Link to Sheet2");
+		});
+		if(!browser) artifax.forEach(function(p) {
+			var wb = X.read(fs.readFileSync(p), {type: TYPE, WTF: true});
+			var ws = wb.Sheets[wb.SheetNames[0]];
+			assert.ok(ws["A1"]);
+			assert.ok(!ws["!data"]);
+
+			wb = X.read(fs.readFileSync(p), {type: TYPE, WTF: true, dense: true});
+			ws = wb.Sheets[wb.SheetNames[0]];
+			assert.ok(!ws["A1"]);
+			assert.ok(ws["!data"][0][0]);
+		});
+	});
+	it('aoa_to_sheet', function() {
+		var aoa = [["SheetJS"],[5433795]];
+		var sp = X.utils.aoa_to_sheet(aoa); assert.equal(sp["A2"].v, 5433795); assert.ok(!sp["!data"]);
+		sp = X.utils.aoa_to_sheet(aoa, {}); assert.equal(sp["A2"].v, 5433795); assert.ok(!sp["!data"]);
+		sp = X.utils.aoa_to_sheet(aoa, {dense: false}); assert.equal(sp["A2"].v, 5433795); assert.ok(!sp["!data"]);
+		var ds = X.utils.aoa_to_sheet(aoa, {dense: true}); assert.equal(ds["!data"][1][0].v, 5433795); assert.ok(!ds["A2"]);
+	});
+	it('json_to_sheet', function() {
+		var json = [{"SheetJS": 5433795}];
+		var sp = X.utils.json_to_sheet(json); assert.equal(sp["A2"].v, 5433795); assert.ok(!sp["!data"]);
+		sp = X.utils.json_to_sheet(json, {}); assert.equal(sp["A2"].v, 5433795); assert.ok(!sp["!data"]);
+		sp = X.utils.json_to_sheet(json, {dense: false}); assert.equal(sp["A2"].v, 5433795); assert.ok(!sp["!data"]);
+		var ds = X.utils.json_to_sheet(json, {dense: true}); assert.equal(ds["!data"][1][0].v, 5433795); assert.ok(!ds["A2"]);
+	});
+	it('sheet_add_aoa', function() {
+		var aoa = [["SheetJS"]];
+		var sp = X.utils.aoa_to_sheet(aoa); X.utils.sheet_add_aoa(sp, [[5433795]], {origin:-1}); assert.equal(sp["A2"].v, 5433795); assert.ok(!sp["!data"]);
+		sp = X.utils.aoa_to_sheet(aoa); X.utils.sheet_add_aoa(sp, [[5433795]], {origin:-1, dense: true}); assert.equal(sp["A2"].v, 5433795); assert.ok(!sp["!data"]);
+		var ds = X.utils.aoa_to_sheet(aoa, {dense: true}); X.utils.sheet_add_aoa(ds, [[5433795]], {origin:-1}); assert.equal(ds["!data"][1][0].v, 5433795); assert.ok(!ds["A2"]);
+		ds = X.utils.aoa_to_sheet(aoa, {dense: true}); X.utils.sheet_add_aoa(ds, [[5433795]], {origin:-1, dense: true}); assert.equal(ds["!data"][1][0].v, 5433795); assert.ok(!ds["A2"]);
+	});
+	it('sheet_add_json', function() {
+		var aoa = [["SheetJS"]];
+		var sp = X.utils.aoa_to_sheet(aoa); X.utils.sheet_add_json(sp, [{X:5433795}], {origin:-1, skipHeader:1}); assert.equal(sp["A2"].v, 5433795); assert.ok(!sp["!data"]);
+		sp = X.utils.aoa_to_sheet(aoa); X.utils.sheet_add_json(sp, [{X:5433795}], {origin:-1, skipHeader: 1, dense: true}); assert.equal(sp["A2"].v, 5433795); assert.ok(!sp["!data"]);
+		var ds = X.utils.aoa_to_sheet(aoa, {dense: true}); X.utils.sheet_add_json(ds, [{X:5433795}], {origin:-1, skipHeader: 1}); assert.equal(ds["!data"][1][0].v, 5433795); assert.ok(!ds["A2"]);
+		ds = X.utils.aoa_to_sheet(aoa, {dense: true}); X.utils.sheet_add_json(ds, [{X:5433795}], {origin:-1, skipHeader: 1, dense: true}); assert.equal(ds["!data"][1][0].v, 5433795); assert.ok(!ds["A2"]);
+	});
+	ofmt.forEach(function(f) { it('write ' + f, function() {
+		var aoa = [["SheetJS"],[5433795]];
+		var wb = X.utils.book_new(X.utils.aoa_to_sheet(aoa));
+		var newwb = X.read(X.write(wb, {type:"binary", bookType:f}), {type:"binary"});
+		assert.equal(get_cell(newwb.Sheets["Sheet1"], "A1").v, "SheetJS");
+		assert.equal(get_cell(newwb.Sheets["Sheet1"], "A2").v, 5433795);
+	}); });
+;});
 
 describe('corner cases', function() {
 	it('output functions', function() {

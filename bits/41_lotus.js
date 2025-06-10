@@ -24,15 +24,33 @@ var WK_ = /*#__PURE__*/(function() {
 		throw "Unsupported type " + opts.type;
 	}
 
+	/* NOTE: this list intentionally starts at 1 */
+	var LOTUS_DATE_FMTS = [
+		"mmmm",
+		"dd-mmm-yyyy",
+		"dd-mmm",
+		"mmm-yyyy",
+		"@", // "text"?
+		"mm/dd",
+		"hh:mm:ss AM/PM", // 7
+		"hh:mm AM/PM",
+		"mm/dd/yyyy",
+		"mm/dd",
+		"hh:mm:ss",
+		"hh:mm" // 12
+	];
+
 	function lotus_to_workbook_buf(d, opts)/*:Workbook*/ {
 		if(!d) return d;
 		var o = opts || {};
 		if(DENSE != null && o.dense == null) o.dense = DENSE;
-		var s/*:Worksheet*/ = ((o.dense ? [] : {})/*:any*/), n = "Sheet1", next_n = "", sidx = 0;
-		var sheets = {}, snames = [], realnames = [];
+		var s/*:Worksheet*/ = ({}/*:any*/), n = "Sheet1", next_n = "", sidx = 0;
+		var sheets = {}, snames = [], realnames = [], sdata = [];
+		if(o.dense) sdata = s["!data"] = [];
 
 		var refguess = {s: {r:0, c:0}, e: {r:0, c:0} };
 		var sheetRows = o.sheetRows || 0;
+		var lastcell = {};
 
 		if(d[4] == 0x51 && d[5] == 0x50 && d[6] == 0x57) return qpw_to_workbook_buf(d, opts);
 		if(d[2] == 0x00) {
@@ -64,9 +82,9 @@ var WK_ = /*#__PURE__*/(function() {
 				case 0x0E: /* NUMBER */
 				case 0x10: /* FORMULA */
 					/* TODO: actual translation of the format code */
-					if(RT == 0x0E && (val[2] & 0x70) == 0x70 && (val[2] & 0x0F) > 1 && (val[2] & 0x0F) < 15) {
-						val[1].z = o.dateNF || table_fmt[14];
-						if(o.cellDates) { val[1].t = 'd'; val[1].v = numdate(val[1].v); }
+					if((val[2] & 0x70) == 0x70 && (val[2] & 0x0F) > 1 && (val[2] & 0x0F) < 15) {
+						val[1].z = o.dateNF || LOTUS_DATE_FMTS[(val[2] & 0x0F)-1] || table_fmt[14];
+						if(o.cellDates) { val[1].v = numdate(val[1].v); val[1].t = typeof val[1].v == "number" ? 'n' : 'd'; }
 					}
 
 					if(o.qpro) {
@@ -74,26 +92,36 @@ var WK_ = /*#__PURE__*/(function() {
 							s["!ref"] = encode_range(refguess);
 							sheets[n] = s;
 							snames.push(n);
-							s = (o.dense ? [] : {});
+							s = ({}/*:any*/); if(o.dense) sdata = s["!data"] = [];
 							refguess = {s: {r:0, c:0}, e: {r:0, c:0} };
 							sidx = val[3]; n = next_n || "Sheet" + (sidx + 1); next_n = "";
 						}
 					}
 
-					var tmpcell = o.dense ? (s[val[0].r]||[])[val[0].c] : s[encode_cell(val[0])];
+					var tmpcell = o.dense ? (sdata[val[0].r]||[])[val[0].c] : s[encode_cell(val[0])];
 					if(tmpcell) {
 						tmpcell.t = val[1].t; tmpcell.v = val[1].v;
 						if(val[1].z != null) tmpcell.z = val[1].z;
 						if(val[1].f != null) tmpcell.f = val[1].f;
+						lastcell = tmpcell;
 						break;
 					}
 					if(o.dense) {
-						if(!s[val[0].r]) s[val[0].r] = [];
-						s[val[0].r][val[0].c] = val[1];
+						if(!sdata[val[0].r]) sdata[val[0].r] = [];
+						sdata[val[0].r][val[0].c] = val[1];
 					} else s[encode_cell(val[0])] = val[1];
+					lastcell = val[1];
 					break;
 				case 0x5405: o.works2 = true; break;
-				default:
+				case 0x5402: {
+					/* TODO: enumerate all extended number formats */
+					if(val == 0x14a1) {
+						lastcell.z = "hh:mm:ss";
+						if(o.cellDates && lastcell.t == "n") {
+							lastcell.v = numdate(lastcell.v); lastcell.t = typeof lastcell.v == "number" ? 'n' : 'd';
+						}
+					}
+				} break;
 			}}, o);
 		} else if(d[2] == 0x1A || d[2] == 0x0E) {
 			o.Enum = WK3Enum;
@@ -115,14 +143,14 @@ var WK_ = /*#__PURE__*/(function() {
 						s["!ref"] = encode_range(refguess);
 						sheets[n] = s;
 						snames.push(n);
-						s = (o.dense ? [] : {});
+						s = ({}/*:any*/); if(o.dense) sdata = s["!data"] = [];
 						refguess = {s: {r:0, c:0}, e: {r:0, c:0} };
 						sidx = val[3]; n = "Sheet" + (sidx + 1);
 					}
 					if(sheetRows > 0 && val[0].r >= sheetRows) break;
 					if(o.dense) {
-						if(!s[val[0].r]) s[val[0].r] = [];
-						s[val[0].r][val[0].c] = val[1];
+						if(!sdata[val[0].r]) sdata[val[0].r] = [];
+						sdata[val[0].r][val[0].c] = val[1];
 					} else s[encode_cell(val[0])] = val[1];
 					if(refguess.e.c < val[0].c) refguess.e.c = val[0].c;
 					if(refguess.e.r < val[0].r) refguess.e.r = val[0].r;
@@ -156,25 +184,32 @@ var WK_ = /*#__PURE__*/(function() {
 		if(+o.codepage >= 0) set_cp(+o.codepage);
 		if(o.type == "string") throw new Error("Cannot write WK1 to JS string");
 		var ba = buf_array();
+		if(!ws["!ref"]) throw new Error("Cannot export empty sheet to WK1");
 		var range = safe_decode_range(ws["!ref"]);
-		var dense = Array.isArray(ws);
+		var dense = ws["!data"] != null;
 		var cols = [];
 
 		write_biff_rec(ba, 0x00, write_BOF_WK1(0x0406));
 		write_biff_rec(ba, 0x06, write_RANGE(range));
 		var max_R = Math.min(range.e.r, 8191);
+		for(var C = range.s.c; C <= range.e.c; ++C) cols[C] = encode_col(C);
 		for(var R = range.s.r; R <= max_R; ++R) {
 			var rr = encode_row(R);
-			for(var C = range.s.c; C <= range.e.c; ++C) {
-				if(R === range.s.r) cols[C] = encode_col(C);
-				var ref = cols[C] + rr;
-				var cell = dense ? (ws[R]||[])[C] : ws[ref];
+			for(C = range.s.c; C <= range.e.c; ++C) {
+				var cell = dense ? (ws["!data"][R]||[])[C] : ws[cols[C] + rr];
 				if(!cell || cell.t == "z") continue;
 				/* TODO: formula records */
-				if(cell.t == "n") {
-					if((cell.v|0)==cell.v && cell.v >= -32768 && cell.v <= 32767) write_biff_rec(ba, 0x0d, write_INTEGER(R, C, cell.v));
-					else write_biff_rec(ba, 0x0e, write_NUMBER(R, C, cell.v));
-				} else {
+				switch(cell.t) {
+				case "n":
+					if((cell.v|0)==cell.v && cell.v >= -32768 && cell.v <= 32767) write_biff_rec(ba, 0x0d, write_INTEGER(R, C, cell));
+					else write_biff_rec(ba, 0x0e, write_NUMBER(R, C, cell));
+					break;
+				case "d":
+					var dc = datenum(cell.v);
+					if((dc|0)==dc && dc >= -32768 && dc <= 32767) write_biff_rec(ba, 0x0d, write_INTEGER(R, C, {t:"n", v:dc, z:cell.z || table_fmt[14]}));
+					else write_biff_rec(ba, 0x0e, write_NUMBER(R, C, {t:"n", v:dc, z:cell.z || table_fmt[14]}));
+					break;
+				default:
 					var str = format_cell(cell);
 					write_biff_rec(ba, 0x0F, write_LABEL(R, C, str.slice(0, 239)));
 				}
@@ -200,7 +235,7 @@ var WK_ = /*#__PURE__*/(function() {
 			var ws = wb.Sheets[wb.SheetNames[i]];
 			if(!ws || !ws["!ref"]) continue;
 			var range = safe_decode_range(ws["!ref"]);
-			var dense = Array.isArray(ws);
+			var dense = ws["!data"] != null;
 			var cols = [];
 			var max_R = Math.min(range.e.r, 8191);
 			for(var R = range.s.r; R <= max_R; ++R) {
@@ -208,7 +243,7 @@ var WK_ = /*#__PURE__*/(function() {
 				for(var C = range.s.c; C <= range.e.c; ++C) {
 					if(R === range.s.r) cols[C] = encode_col(C);
 					var ref = cols[C] + rr;
-					var cell = dense ? (ws[R]||[])[C] : ws[ref];
+					var cell = dense ? (ws["!data"][R]||[])[C] : ws[ref];
 					if(!cell || cell.t == "z") continue;
 					/* TODO: FORMULA19 NUMBER18 records */
 					if(cell.t == "n") {
@@ -308,11 +343,18 @@ var WK_ = /*#__PURE__*/(function() {
 		return o;
 	}
 
+	function get_wk1_fmt(cell)/*:number*/ {
+		/* TODO: some fuzzy matching on the number format */
+		if(cell.z && fmt_is_date(cell.z)) {
+			return 0xf0 | (LOTUS_DATE_FMTS.indexOf(cell.z) + 1 || 2);
+		}
+		return 0xFF;
+	}
 	function parse_LABEL(blob, length, opts) {
 		var tgt = blob.l + length;
 		var o = parse_cell(blob, length, opts);
 		o[1].t = 's';
-		if(opts.vers == 0x5120) {
+		if((opts.vers & 0xFFFE) == 0x5120) { // WQ1 / WQ2
 			blob.l++;
 			var len = blob.read_shift(1);
 			o[1].v = blob.read_shift(len, 'utf8');
@@ -354,12 +396,12 @@ var WK_ = /*#__PURE__*/(function() {
 		o[1].v = blob.read_shift(2, 'i');
 		return o;
 	}
-	function write_INTEGER(R, C, v) {
+	function write_INTEGER(R, C, cell) {
 		var o = new_buf(7);
-		o.write_shift(1, 0xFF);
+		o.write_shift(1, get_wk1_fmt(cell));
 		o.write_shift(2, C);
 		o.write_shift(2, R);
-		o.write_shift(2, v, 'i');
+		o.write_shift(2, cell.v, 'i');
 		return o;
 	}
 
@@ -368,12 +410,12 @@ var WK_ = /*#__PURE__*/(function() {
 		o[1].v = blob.read_shift(8, 'f');
 		return o;
 	}
-	function write_NUMBER(R, C, v) {
+	function write_NUMBER(R, C, cell) {
 		var o = new_buf(13);
-		o.write_shift(1, 0xFF);
+		o.write_shift(1, get_wk1_fmt(cell));
 		o.write_shift(2, C);
 		o.write_shift(2, R);
-		o.write_shift(8, v, 'f');
+		o.write_shift(8, cell.v, 'f');
 		return o;
 	}
 
@@ -426,7 +468,7 @@ var WK_ = /*#__PURE__*/(function() {
 		0x33: ["FALSE", 0],
 		0x34: ["TRUE", 0],
 		0x35: ["RAND", 0],
-		// 0x36 DATE
+		0x36: ["DATE", 3],
 		// 0x37 NOW
 		// 0x38 PMT
 		// 0x39 PV
@@ -436,7 +478,7 @@ var WK_ = /*#__PURE__*/(function() {
 		// 0x3D MONTH
 		// 0x3E YEAR
 		0x3F: ["ROUND", 2],
-		// 0x40 TIME
+		0x40: ["TIME", 3],
 		// 0x41 HOUR
 		// 0x42 MINUTE
 		// 0x43 SECOND
@@ -721,209 +763,251 @@ var WK_ = /*#__PURE__*/(function() {
 	}
 
 	var WK1Enum = {
-		/*::[*/0x0000/*::]*/: { n:"BOF", f:parseuint16 },
-		/*::[*/0x0001/*::]*/: { n:"EOF" },
-		/*::[*/0x0002/*::]*/: { n:"CALCMODE" },
-		/*::[*/0x0003/*::]*/: { n:"CALCORDER" },
-		/*::[*/0x0004/*::]*/: { n:"SPLIT" },
-		/*::[*/0x0005/*::]*/: { n:"SYNC" },
-		/*::[*/0x0006/*::]*/: { n:"RANGE", f:parse_RANGE },
-		/*::[*/0x0007/*::]*/: { n:"WINDOW1" },
-		/*::[*/0x0008/*::]*/: { n:"COLW1" },
-		/*::[*/0x0009/*::]*/: { n:"WINTWO" },
-		/*::[*/0x000A/*::]*/: { n:"COLW2" },
-		/*::[*/0x000B/*::]*/: { n:"NAME" },
-		/*::[*/0x000C/*::]*/: { n:"BLANK" },
-		/*::[*/0x000D/*::]*/: { n:"INTEGER", f:parse_INTEGER },
-		/*::[*/0x000E/*::]*/: { n:"NUMBER", f:parse_NUMBER },
-		/*::[*/0x000F/*::]*/: { n:"LABEL", f:parse_LABEL },
-		/*::[*/0x0010/*::]*/: { n:"FORMULA", f:parse_FORMULA },
-		/*::[*/0x0018/*::]*/: { n:"TABLE" },
-		/*::[*/0x0019/*::]*/: { n:"ORANGE" },
-		/*::[*/0x001A/*::]*/: { n:"PRANGE" },
-		/*::[*/0x001B/*::]*/: { n:"SRANGE" },
-		/*::[*/0x001C/*::]*/: { n:"FRANGE" },
-		/*::[*/0x001D/*::]*/: { n:"KRANGE1" },
-		/*::[*/0x0020/*::]*/: { n:"HRANGE" },
-		/*::[*/0x0023/*::]*/: { n:"KRANGE2" },
-		/*::[*/0x0024/*::]*/: { n:"PROTEC" },
-		/*::[*/0x0025/*::]*/: { n:"FOOTER" },
-		/*::[*/0x0026/*::]*/: { n:"HEADER" },
-		/*::[*/0x0027/*::]*/: { n:"SETUP" },
-		/*::[*/0x0028/*::]*/: { n:"MARGINS" },
-		/*::[*/0x0029/*::]*/: { n:"LABELFMT" },
-		/*::[*/0x002A/*::]*/: { n:"TITLES" },
-		/*::[*/0x002B/*::]*/: { n:"SHEETJS" },
-		/*::[*/0x002D/*::]*/: { n:"GRAPH" },
-		/*::[*/0x002E/*::]*/: { n:"NGRAPH" },
-		/*::[*/0x002F/*::]*/: { n:"CALCCOUNT" },
-		/*::[*/0x0030/*::]*/: { n:"UNFORMATTED" },
-		/*::[*/0x0031/*::]*/: { n:"CURSORW12" },
-		/*::[*/0x0032/*::]*/: { n:"WINDOW" },
-		/*::[*/0x0033/*::]*/: { n:"STRING", f:parse_STRING },
-		/*::[*/0x0037/*::]*/: { n:"PASSWORD" },
-		/*::[*/0x0038/*::]*/: { n:"LOCKED" },
-		/*::[*/0x003C/*::]*/: { n:"QUERY" },
-		/*::[*/0x003D/*::]*/: { n:"QUERYNAME" },
-		/*::[*/0x003E/*::]*/: { n:"PRINT" },
-		/*::[*/0x003F/*::]*/: { n:"PRINTNAME" },
-		/*::[*/0x0040/*::]*/: { n:"GRAPH2" },
-		/*::[*/0x0041/*::]*/: { n:"GRAPHNAME" },
-		/*::[*/0x0042/*::]*/: { n:"ZOOM" },
-		/*::[*/0x0043/*::]*/: { n:"SYMSPLIT" },
-		/*::[*/0x0044/*::]*/: { n:"NSROWS" },
-		/*::[*/0x0045/*::]*/: { n:"NSCOLS" },
-		/*::[*/0x0046/*::]*/: { n:"RULER" },
-		/*::[*/0x0047/*::]*/: { n:"NNAME" },
-		/*::[*/0x0048/*::]*/: { n:"ACOMM" },
-		/*::[*/0x0049/*::]*/: { n:"AMACRO" },
-		/*::[*/0x004A/*::]*/: { n:"PARSE" },
-		/*::[*/0x0066/*::]*/: { n:"PRANGES??" },
-		/*::[*/0x0067/*::]*/: { n:"RRANGES??" },
-		/*::[*/0x0068/*::]*/: { n:"FNAME??" },
-		/*::[*/0x0069/*::]*/: { n:"MRANGES??" },
-		/*::[*/0x00CC/*::]*/: { n:"SHEETNAMECS", f:parse_SHEETNAMECS },
-		/*::[*/0x00DE/*::]*/: { n:"SHEETNAMELP", f:parse_SHEETNAMELP },
-		/*::[*/0x00FF/*::]*/: { n:"BOF", f:parseuint16 },
-		/*::[*/0xFFFF/*::]*/: { n:"" }
+		0x0000: { n:"BOF", f:parseuint16 },
+		0x0001: { n:"EOF" },
+		0x0002: { n:"CALCMODE" },
+		0x0003: { n:"CALCORDER" },
+		0x0004: { n:"SPLIT" },
+		0x0005: { n:"SYNC" },
+		0x0006: { n:"RANGE", f:parse_RANGE },
+		0x0007: { n:"WINDOW1" },
+		0x0008: { n:"COLW1" },
+		0x0009: { n:"WINTWO" },
+		0x000A: { n:"COLW2" },
+		0x000B: { n:"NAME" },
+		0x000C: { n:"BLANK" },
+		0x000D: { n:"INTEGER", f:parse_INTEGER },
+		0x000E: { n:"NUMBER", f:parse_NUMBER },
+		0x000F: { n:"LABEL", f:parse_LABEL },
+		0x0010: { n:"FORMULA", f:parse_FORMULA },
+		0x0018: { n:"TABLE" },
+		0x0019: { n:"ORANGE" },
+		0x001A: { n:"PRANGE" },
+		0x001B: { n:"SRANGE" },
+		0x001C: { n:"FRANGE" },
+		0x001D: { n:"KRANGE1" },
+		0x0020: { n:"HRANGE" },
+		0x0023: { n:"KRANGE2" },
+		0x0024: { n:"PROTEC" },
+		0x0025: { n:"FOOTER" },
+		0x0026: { n:"HEADER" },
+		0x0027: { n:"SETUP" },
+		0x0028: { n:"MARGINS" },
+		0x0029: { n:"LABELFMT" },
+		0x002A: { n:"TITLES" },
+		0x002B: { n:"SHEETJS" },
+		0x002D: { n:"GRAPH" },
+		0x002E: { n:"NGRAPH" },
+		0x002F: { n:"CALCCOUNT" },
+		0x0030: { n:"UNFORMATTED" },
+		0x0031: { n:"CURSORW12" },
+		0x0032: { n:"WINDOW" },
+		0x0033: { n:"STRING", f:parse_STRING },
+		0x0037: { n:"PASSWORD" },
+		0x0038: { n:"LOCKED" },
+		0x003C: { n:"QUERY" },
+		0x003D: { n:"QUERYNAME" },
+		0x003E: { n:"PRINT" },
+		0x003F: { n:"PRINTNAME" },
+		0x0040: { n:"GRAPH2" },
+		0x0041: { n:"GRAPHNAME" },
+		0x0042: { n:"ZOOM" },
+		0x0043: { n:"SYMSPLIT" },
+		0x0044: { n:"NSROWS" },
+		0x0045: { n:"NSCOLS" },
+		0x0046: { n:"RULER" },
+		0x0047: { n:"NNAME" },
+		0x0048: { n:"ACOMM" },
+		0x0049: { n:"AMACRO" },
+		0x004A: { n:"PARSE" },
+		// 0x0064
+		0x0066: { n:"PRANGES??" },
+		0x0067: { n:"RRANGES??" },
+		0x0068: { n:"FNAME??" },
+		0x0069: { n:"MRANGES??" },
+		// 0x0096
+		// 0x0099
+		// 0x009A
+		// 0x009B
+		// 0x009C
+		// 0x00C0
+		// 0x00C7
+		// 0x00C9
+		0x00CC: { n:"SHEETNAMECS", f:parse_SHEETNAMECS },
+		// 0x00CD
+		0x00DE: { n:"SHEETNAMELP", f:parse_SHEETNAMELP },
+		0x00FF: { n:"BOF", f:parseuint16 },
+		0x5402: { n:"WKSNF", f:parseuint16 },
+		0xFFFF: { n:"" }
 	};
 
 	var WK3Enum = {
-		/*::[*/0x0000/*::]*/: { n:"BOF" },
-		/*::[*/0x0001/*::]*/: { n:"EOF" },
-		/*::[*/0x0002/*::]*/: { n:"PASSWORD" },
-		/*::[*/0x0003/*::]*/: { n:"CALCSET" },
-		/*::[*/0x0004/*::]*/: { n:"WINDOWSET" },
-		/*::[*/0x0005/*::]*/: { n:"SHEETCELLPTR" },
-		/*::[*/0x0006/*::]*/: { n:"SHEETLAYOUT" },
-		/*::[*/0x0007/*::]*/: { n:"COLUMNWIDTH" },
-		/*::[*/0x0008/*::]*/: { n:"HIDDENCOLUMN" },
-		/*::[*/0x0009/*::]*/: { n:"USERRANGE" },
-		/*::[*/0x000A/*::]*/: { n:"SYSTEMRANGE" },
-		/*::[*/0x000B/*::]*/: { n:"ZEROFORCE" },
-		/*::[*/0x000C/*::]*/: { n:"SORTKEYDIR" },
-		/*::[*/0x000D/*::]*/: { n:"FILESEAL" },
-		/*::[*/0x000E/*::]*/: { n:"DATAFILLNUMS" },
-		/*::[*/0x000F/*::]*/: { n:"PRINTMAIN" },
-		/*::[*/0x0010/*::]*/: { n:"PRINTSTRING" },
-		/*::[*/0x0011/*::]*/: { n:"GRAPHMAIN" },
-		/*::[*/0x0012/*::]*/: { n:"GRAPHSTRING" },
-		/*::[*/0x0013/*::]*/: { n:"??" },
-		/*::[*/0x0014/*::]*/: { n:"ERRCELL" },
-		/*::[*/0x0015/*::]*/: { n:"NACELL" },
-		/*::[*/0x0016/*::]*/: { n:"LABEL16", f:parse_LABEL_16},
-		/*::[*/0x0017/*::]*/: { n:"NUMBER17", f:parse_NUMBER_17 },
-		/*::[*/0x0018/*::]*/: { n:"NUMBER18", f:parse_NUMBER_18 },
-		/*::[*/0x0019/*::]*/: { n:"FORMULA19", f:parse_FORMULA_19},
-		/*::[*/0x001A/*::]*/: { n:"FORMULA1A" },
-		/*::[*/0x001B/*::]*/: { n:"XFORMAT", f:parse_XFORMAT },
-		/*::[*/0x001C/*::]*/: { n:"DTLABELMISC" },
-		/*::[*/0x001D/*::]*/: { n:"DTLABELCELL" },
-		/*::[*/0x001E/*::]*/: { n:"GRAPHWINDOW" },
-		/*::[*/0x001F/*::]*/: { n:"CPA" },
-		/*::[*/0x0020/*::]*/: { n:"LPLAUTO" },
-		/*::[*/0x0021/*::]*/: { n:"QUERY" },
-		/*::[*/0x0022/*::]*/: { n:"HIDDENSHEET" },
-		/*::[*/0x0023/*::]*/: { n:"??" },
-		/*::[*/0x0025/*::]*/: { n:"NUMBER25", f:parse_NUMBER_25 },
-		/*::[*/0x0026/*::]*/: { n:"??" },
-		/*::[*/0x0027/*::]*/: { n:"NUMBER27", f:parse_NUMBER_27 },
-		/*::[*/0x0028/*::]*/: { n:"FORMULA28", f:parse_FORMULA_28 },
-		/*::[*/0x008E/*::]*/: { n:"??" },
-		/*::[*/0x0093/*::]*/: { n:"??" },
-		/*::[*/0x0096/*::]*/: { n:"??" },
-		/*::[*/0x0097/*::]*/: { n:"??" },
-		/*::[*/0x0098/*::]*/: { n:"??" },
-		/*::[*/0x0099/*::]*/: { n:"??" },
-		/*::[*/0x009A/*::]*/: { n:"??" },
-		/*::[*/0x009B/*::]*/: { n:"??" },
-		/*::[*/0x009C/*::]*/: { n:"??" },
-		/*::[*/0x00A3/*::]*/: { n:"??" },
-		/*::[*/0x00AE/*::]*/: { n:"??" },
-		/*::[*/0x00AF/*::]*/: { n:"??" },
-		/*::[*/0x00B0/*::]*/: { n:"??" },
-		/*::[*/0x00B1/*::]*/: { n:"??" },
-		/*::[*/0x00B8/*::]*/: { n:"??" },
-		/*::[*/0x00B9/*::]*/: { n:"??" },
-		/*::[*/0x00BA/*::]*/: { n:"??" },
-		/*::[*/0x00BB/*::]*/: { n:"??" },
-		/*::[*/0x00BC/*::]*/: { n:"??" },
-		/*::[*/0x00C3/*::]*/: { n:"??" },
-		/*::[*/0x00C9/*::]*/: { n:"??" },
-		/*::[*/0x00CC/*::]*/: { n:"SHEETNAMECS", f:parse_SHEETNAMECS },
-		/*::[*/0x00CD/*::]*/: { n:"??" },
-		/*::[*/0x00CE/*::]*/: { n:"??" },
-		/*::[*/0x00CF/*::]*/: { n:"??" },
-		/*::[*/0x00D0/*::]*/: { n:"??" },
-		/*::[*/0x0100/*::]*/: { n:"??" },
-		/*::[*/0x0103/*::]*/: { n:"??" },
-		/*::[*/0x0104/*::]*/: { n:"??" },
-		/*::[*/0x0105/*::]*/: { n:"??" },
-		/*::[*/0x0106/*::]*/: { n:"??" },
-		/*::[*/0x0107/*::]*/: { n:"??" },
-		/*::[*/0x0109/*::]*/: { n:"??" },
-		/*::[*/0x010A/*::]*/: { n:"??" },
-		/*::[*/0x010B/*::]*/: { n:"??" },
-		/*::[*/0x010C/*::]*/: { n:"??" },
-		/*::[*/0x010E/*::]*/: { n:"??" },
-		/*::[*/0x010F/*::]*/: { n:"??" },
-		/*::[*/0x0180/*::]*/: { n:"??" },
-		/*::[*/0x0185/*::]*/: { n:"??" },
-		/*::[*/0x0186/*::]*/: { n:"??" },
-		/*::[*/0x0189/*::]*/: { n:"??" },
-		/*::[*/0x018C/*::]*/: { n:"??" },
-		/*::[*/0x0200/*::]*/: { n:"??" },
-		/*::[*/0x0202/*::]*/: { n:"??" },
-		/*::[*/0x0201/*::]*/: { n:"??" },
-		/*::[*/0x0204/*::]*/: { n:"??" },
-		/*::[*/0x0205/*::]*/: { n:"??" },
-		/*::[*/0x0280/*::]*/: { n:"??" },
-		/*::[*/0x0281/*::]*/: { n:"??" },
-		/*::[*/0x0282/*::]*/: { n:"??" },
-		/*::[*/0x0283/*::]*/: { n:"??" },
-		/*::[*/0x0284/*::]*/: { n:"??" },
-		/*::[*/0x0285/*::]*/: { n:"??" },
-		/*::[*/0x0286/*::]*/: { n:"??" },
-		/*::[*/0x0287/*::]*/: { n:"??" },
-		/*::[*/0x0288/*::]*/: { n:"??" },
-		/*::[*/0x0292/*::]*/: { n:"??" },
-		/*::[*/0x0293/*::]*/: { n:"??" },
-		/*::[*/0x0294/*::]*/: { n:"??" },
-		/*::[*/0x0295/*::]*/: { n:"??" },
-		/*::[*/0x0296/*::]*/: { n:"??" },
-		/*::[*/0x0299/*::]*/: { n:"??" },
-		/*::[*/0x029A/*::]*/: { n:"??" },
-		/*::[*/0x0300/*::]*/: { n:"??" },
-		/*::[*/0x0304/*::]*/: { n:"??" },
-		/*::[*/0x0601/*::]*/: { n:"SHEETINFOQP", f:parse_SHEETINFOQP },
-		/*::[*/0x0640/*::]*/: { n:"??" },
-		/*::[*/0x0642/*::]*/: { n:"??" },
-		/*::[*/0x0701/*::]*/: { n:"??" },
-		/*::[*/0x0702/*::]*/: { n:"??" },
-		/*::[*/0x0703/*::]*/: { n:"??" },
-		/*::[*/0x0704/*::]*/: { n:"??" },
-		/*::[*/0x0780/*::]*/: { n:"??" },
-		/*::[*/0x0800/*::]*/: { n:"??" },
-		/*::[*/0x0801/*::]*/: { n:"??" },
-		/*::[*/0x0804/*::]*/: { n:"??" },
-		/*::[*/0x0A80/*::]*/: { n:"??" },
-		/*::[*/0x2AF6/*::]*/: { n:"??" },
-		/*::[*/0x3231/*::]*/: { n:"??" },
-		/*::[*/0x6E49/*::]*/: { n:"??" },
-		/*::[*/0x6F44/*::]*/: { n:"??" },
-		/*::[*/0xFFFF/*::]*/: { n:"" }
+		0x0000: { n:"BOF" },
+		0x0001: { n:"EOF" },
+		0x0002: { n:"PASSWORD" },
+		0x0003: { n:"CALCSET" },
+		0x0004: { n:"WINDOWSET" },
+		0x0005: { n:"SHEETCELLPTR" },
+		0x0006: { n:"SHEETLAYOUT" },
+		0x0007: { n:"COLUMNWIDTH" },
+		0x0008: { n:"HIDDENCOLUMN" },
+		0x0009: { n:"USERRANGE" },
+		0x000A: { n:"SYSTEMRANGE" },
+		0x000B: { n:"ZEROFORCE" },
+		0x000C: { n:"SORTKEYDIR" },
+		0x000D: { n:"FILESEAL" },
+		0x000E: { n:"DATAFILLNUMS" },
+		0x000F: { n:"PRINTMAIN" },
+		0x0010: { n:"PRINTSTRING" },
+		0x0011: { n:"GRAPHMAIN" },
+		0x0012: { n:"GRAPHSTRING" },
+		0x0013: { n:"??" },
+		0x0014: { n:"ERRCELL" },
+		0x0015: { n:"NACELL" },
+		0x0016: { n:"LABEL16", f:parse_LABEL_16},
+		0x0017: { n:"NUMBER17", f:parse_NUMBER_17 },
+		0x0018: { n:"NUMBER18", f:parse_NUMBER_18 },
+		0x0019: { n:"FORMULA19", f:parse_FORMULA_19},
+		0x001A: { n:"FORMULA1A" },
+		0x001B: { n:"XFORMAT", f:parse_XFORMAT },
+		0x001C: { n:"DTLABELMISC" },
+		0x001D: { n:"DTLABELCELL" },
+		0x001E: { n:"GRAPHWINDOW" },
+		0x001F: { n:"CPA" },
+		0x0020: { n:"LPLAUTO" },
+		0x0021: { n:"QUERY" },
+		0x0022: { n:"HIDDENSHEET" },
+		0x0023: { n:"??" },
+		0x0025: { n:"NUMBER25", f:parse_NUMBER_25 },
+		0x0026: { n:"??" },
+		0x0027: { n:"NUMBER27", f:parse_NUMBER_27 },
+		0x0028: { n:"FORMULA28", f:parse_FORMULA_28 },
+		0x008E: { n:"??" },
+		0x0093: { n:"??" },
+		0x0096: { n:"??" },
+		0x0097: { n:"??" },
+		0x0098: { n:"??" },
+		0x0099: { n:"??" },
+		0x009A: { n:"??" },
+		0x009B: { n:"??" },
+		0x009C: { n:"??" },
+		0x00A3: { n:"??" },
+		0x00AE: { n:"??" },
+		0x00AF: { n:"??" },
+		0x00B0: { n:"??" },
+		0x00B1: { n:"??" },
+		0x00B8: { n:"??" },
+		0x00B9: { n:"??" },
+		0x00BA: { n:"??" },
+		0x00BB: { n:"??" },
+		0x00BC: { n:"??" },
+		0x00C3: { n:"??" },
+		0x00C9: { n:"??" },
+		0x00CC: { n:"SHEETNAMECS", f:parse_SHEETNAMECS },
+		0x00CD: { n:"??" },
+		0x00CE: { n:"??" },
+		0x00CF: { n:"??" },
+		0x00D0: { n:"??" },
+		0x0100: { n:"??" },
+		0x0103: { n:"??" },
+		0x0104: { n:"??" },
+		0x0105: { n:"??" },
+		0x0106: { n:"??" },
+		0x0107: { n:"??" },
+		0x0109: { n:"??" },
+		0x010A: { n:"??" },
+		0x010B: { n:"??" },
+		0x010C: { n:"??" },
+		0x010E: { n:"??" },
+		0x010F: { n:"??" },
+		0x0180: { n:"??" },
+		0x0185: { n:"??" },
+		0x0186: { n:"??" },
+		0x0189: { n:"??" },
+		0x018C: { n:"??" },
+		0x0200: { n:"??" },
+		0x0202: { n:"??" },
+		0x0201: { n:"??" },
+		0x0204: { n:"??" },
+		0x0205: { n:"??" },
+		0x0280: { n:"??" },
+		0x0281: { n:"??" },
+		0x0282: { n:"??" },
+		0x0283: { n:"??" },
+		0x0284: { n:"??" },
+		0x0285: { n:"??" },
+		0x0286: { n:"??" },
+		0x0287: { n:"??" },
+		0x0288: { n:"??" },
+		0x0292: { n:"??" },
+		0x0293: { n:"??" },
+		0x0294: { n:"??" },
+		0x0295: { n:"??" },
+		0x0296: { n:"??" },
+		0x0299: { n:"??" },
+		0x029A: { n:"??" },
+		0x0300: { n:"??" },
+		0x0304: { n:"??" },
+		0x0601: { n:"SHEETINFOQP", f:parse_SHEETINFOQP },
+		0x0640: { n:"??" },
+		0x0642: { n:"??" },
+		0x0701: { n:"??" },
+		0x0702: { n:"??" },
+		0x0703: { n:"??" },
+		0x0704: { n:"??" },
+		0x0780: { n:"??" },
+		0x0800: { n:"??" },
+		0x0801: { n:"??" },
+		0x0804: { n:"??" },
+		0x0A80: { n:"??" },
+		0x2AF6: { n:"??" },
+		0x3231: { n:"??" },
+		0x6E49: { n:"??" },
+		0x6F44: { n:"??" },
+		0xFFFF: { n:"" }
 	};
+
+	/* TODO: fill out and verify this table across QP versions */
+	var QPWNFTable = {
+		0x05: "dd-mmm-yy",
+		0x06: "dd-mmm",
+		0x07: "mmm-yy",
+		0x08: "mm/dd/yy", // Long Date Intl
+		0x0A: "hh:mm:ss AM/PM",
+		0x0B: "hh:mm AM/PM",
+		0x0E: "dd-mmm-yyyy",
+		0x0F: "mmm-yyyy",
+
+		/* It is suspected that the the low nybble specifies decimal places */
+		0x0022: "0.00",
+		0x0032: "0.00;[Red]0.00",
+		0x0042: "0.00;\(0.00\)",
+		0x0052: "0.00;[Red]\(0.00\)",
+		0x00A2: '"$"#,##0.00;\\("$"#,##0.00\\)',
+		0x0120: '0%',
+		0x0130: '0E+00',
+		0x0140: '# ?/?'
+	};
+
+	function parse_qpw_str(p) {
+		var cch = p.read_shift(2);
+		var flags = p.read_shift(1);
+		/* TODO: find examples with nonzero flags */
+		if(flags != 0) throw "unsupported QPW string type " + flags.toString(16);
+		return p.read_shift(cch, "sbcs-cont");
+	}
 
 	/* QPW uses a different set of record types */
 	function qpw_to_workbook_buf(d, opts)/*:Workbook*/ {
 		prep_blob(d, 0);
 		var o = opts || {};
 		if(DENSE != null && o.dense == null) o.dense = DENSE;
-		var s/*:Worksheet*/ = ((o.dense ? [] : {})/*:any*/);
+		var s/*:Worksheet*/ = ({}/*:any*/); if(o.dense) s["!data"] = [];
 		var SST = [], sname = "", formulae = [];
 		var range = {s:{r:-1,c:-1}, e:{r:-1,c:-1}};
 		var cnt = 0, type = 0, C = 0, R = 0;
 		var wb = { SheetNames: [], Sheets: {} };
+		var FMTS = [];
 		outer: while(d.l < d.length) {
 			var RT = d.read_shift(2), length = d.read_shift(2);
 			var p = d.slice(d.l, d.l + length);
@@ -933,6 +1017,22 @@ var WK_ = /*#__PURE__*/(function() {
 					if(p.read_shift(4) != 0x39575051) throw "Bad QPW9 BOF!";
 					break;
 				case 0x02: /* EOF */ break outer;
+
+				case 0x08: /* NF */ break; // TODO: this is tied to custom number formats
+
+				case 0x0A: /* FORMATS */ {
+					var fcnt = p.read_shift(4);
+					var step = ((p.length - p.l)/ fcnt)|0;
+					for(var ifmt = 0; ifmt < fcnt; ++ifmt) {
+						var end = p.l + step;
+						var fmt = {};
+						p.l += 2;
+						fmt.numFmtId = p.read_shift(2);
+						if(QPWNFTable[fmt.numFmtId]) fmt.z = QPWNFTable[fmt.numFmtId];
+						p.l = end;
+						FMTS.push(fmt);
+					}
+				} break;
 
 				/* TODO: The behavior here should be consistent with Numbers: QP Notebook ~ .TN.SheetArchive, QP Sheet ~ .TST.TableModelArchive */
 				case 0x0401: /* BON */ break;
@@ -956,7 +1056,7 @@ var WK_ = /*#__PURE__*/(function() {
 
 				case 0x0601: { /* BOS */
 					var sidx = p.read_shift(2);
-					s = ((o.dense ? [] : {})/*:any*/);
+					s = ({}/*:any*/); if(o.dense) s["!data"] = [];
 					range.s.c = p.read_shift(2);
 					range.e.c = p.read_shift(2);
 					range.s.r = p.read_shift(4);
@@ -993,20 +1093,28 @@ var WK_ = /*#__PURE__*/(function() {
 					R = p.read_shift(4), cnt = p.read_shift(4);
 					if(range.s.r > R) range.s.r = R;
 					if(range.e.r < R + cnt - 1) range.e.r = R + cnt - 1;
+					var CC = encode_col(C);
 					while(p.l < p.length) {
 						var cell = { t: "z" };
-						var flags = p.read_shift(1);
-						if(flags & 0x80) p.l += 2;
+						var flags = p.read_shift(1), fmtidx = -1;
+						if(flags & 0x80) fmtidx = p.read_shift(2);
 						var mul = (flags & 0x40) ? p.read_shift(2) - 1: 0;
 						switch(flags & 0x1F) {
+							case 0: break;
 							case 1: break;
 							case 2: cell = { t: "n", v: p.read_shift(2) }; break;
 							case 3: cell = { t: "n", v: p.read_shift(2, 'i') }; break;
+							case 4: cell = { t: "n", v: parse_RkNumber(p) }; break;
 							case 5: cell = { t: "n", v: p.read_shift(8, 'f') }; break;
 							case 7: cell = { t: "s", v: SST[type = p.read_shift(4) - 1] }; break;
-							case 8: cell = { t: "n", v: p.read_shift(8, 'f') }; p.l += 2; /* cell.f = formulae[p.read_shift(4)]; */ p.l += 4; break;
+							case 8:
+								cell = { t: "n", v: p.read_shift(8, 'f') };
+								p.l += 2; /* cell.f = formulae[p.read_shift(4)]; */ p.l += 4;
+								if(isNaN(cell.v)) cell = { t: "e", v: 0x0F }; // #VALUE!
+								break;
 							default: throw "Unrecognized QPW cell type " + (flags & 0x1F);
 						}
+						if(fmtidx != -1 && (FMTS[fmtidx - 1]||{}).z) cell.z = FMTS[fmtidx-1].z;
 						var delta = 0;
 						if(flags & 0x20) switch(flags & 0x1F) {
 							case 2: delta = p.read_shift(2); break;
@@ -1015,10 +1123,14 @@ var WK_ = /*#__PURE__*/(function() {
 							default: throw "Unsupported delta for QPW cell type " + (flags & 0x1F);
 						}
 						if(!(!o.sheetStubs && cell.t == "z")) {
-							if(Array.isArray(s)) {
-								if(!s[R]) s[R] = [];
-								s[R][C] = cell;
-							} else s[encode_cell({r:R, c:C})] = cell;
+							var newcell = dup(cell);
+							if(cell.t == "n" && cell.z && fmt_is_date(cell.z) && o.cellDates) {
+								newcell.v = numdate(cell.v); newcell.t = typeof newcell.v == "number" ? 'n' : 'd';
+							}
+							if(s["!data"] != null) {
+								if(!s["!data"][R]) s["!data"][R] = [];
+								s["!data"][R][C] = newcell;
+							} else s[CC + encode_row(R)] = newcell;
 						}
 						++R; --cnt;
 						while(mul-- > 0 && cnt >= 0) {
@@ -1033,15 +1145,27 @@ var WK_ = /*#__PURE__*/(function() {
 								case 7: cell = { t: "s", v: SST[type = p.read_shift(4) - 1] }; break;
 								default: throw "Cannot apply repeat for QPW cell type " + (flags & 0x1F);
 							}
+							if(fmtidx != -1);
 							if(!(!o.sheetStubs && cell.t == "z")) {
-								if(Array.isArray(s)) {
-									if(!s[R]) s[R] = [];
-									s[R][C] = cell;
-								} else s[encode_cell({r:R, c:C})] = cell;
+								if(s["!data"] != null) {
+									if(!s["!data"][R]) s["!data"][R] = [];
+									s["!data"][R][C] = cell;
+								} else s[CC + encode_row(R)] = cell;
 							}
 							++R; --cnt;
 						}
 					}
+				} break;
+
+				case 0x0C02: { /* String (result of string formula expression) */
+					C = p.read_shift(2);
+					R = p.read_shift(4);
+					var str = parse_qpw_str(p);
+					/* TODO: QP10 record has an additional unknown character after the string */
+					if(s["!data"] != null) {
+						if(!s["!data"][R]) s["!data"][R] = [];
+						s["!data"][R][C] = { t:"s", v:str };
+					} else s[encode_col(C) + encode_row(R)] = { t:"s", v:str };
 				} break;
 
 				default: break;

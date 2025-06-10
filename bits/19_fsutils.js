@@ -9,7 +9,7 @@ function blobify(data) {
 }
 /* write or download file */
 function write_dl(fname/*:string*/, payload/*:any*/, enc/*:?string*/) {
-	/*global IE_SaveFile, Blob, navigator, saveAs, document, File, chrome */
+	/*global IE_SaveFile, navigator, saveAs, document, chrome */
 	if(typeof _fs !== 'undefined' && _fs.writeFileSync) return enc ? _fs.writeFileSync(fname, payload, enc) : _fs.writeFileSync(fname, payload);
 	if(typeof Deno !== 'undefined') {
 		/* in this spot, it's safe to assume typed arrays and TextEncoder/TextDecoder exist */
@@ -35,7 +35,7 @@ function write_dl(fname/*:string*/, payload/*:any*/, enc/*:?string*/) {
 			/*:: declare var chrome: any; */
 			if(typeof chrome === 'object' && typeof (chrome.downloads||{}).download == "function") {
 				if(URL.revokeObjectURL && typeof setTimeout !== 'undefined') setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
-				return chrome.downloads.download({ url: url, filename: fname, saveAs: true});
+				return chrome.downloads.download({ url: url, filename: fname, saveAs: true });
 			}
 			var a = document.createElement("a");
 			if(a.download != null) {
@@ -45,6 +45,10 @@ function write_dl(fname/*:string*/, payload/*:any*/, enc/*:?string*/) {
 				if(URL.revokeObjectURL && typeof setTimeout !== 'undefined') setTimeout(function() { URL.revokeObjectURL(url); }, 60000);
 				return url;
 			}
+		} else if(typeof URL !== 'undefined' && !URL.createObjectURL && typeof chrome === 'object') {
+			/* manifest v3 extensions -- no URL.createObjectURL */
+			var b64 = "data:application/octet-stream;base64," + Base64_encode_arr(new Uint8Array(blobify(data)));
+			return chrome.downloads.download({ url: b64, filename: fname, saveAs: true });
 		}
 	}
 	// $FlowIgnore
@@ -53,7 +57,7 @@ function write_dl(fname/*:string*/, payload/*:any*/, enc/*:?string*/) {
 		var out = File(fname); out.open("w"); out.encoding = "binary";
 		if(Array.isArray(payload)) payload = a2s(payload);
 		out.write(payload); out.close(); return payload;
-	} catch(e) { if(!e.message || !e.message.match(/onstruct/)) throw e; }
+	} catch(e) { if(!e.message || e.message.indexOf("onstruct") == -1) throw e; }
 	throw new Error("cannot save file " + fname);
 }
 
@@ -67,6 +71,6 @@ function read_binary(path/*:string*/) {
 		var infile = File(path); infile.open("r"); infile.encoding = "binary";
 		var data = infile.read(); infile.close();
 		return data;
-	} catch(e) { if(!e.message || !e.message.match(/onstruct/)) throw e; }
+	} catch(e) { if(!e.message || e.message.indexOf("onstruct") == -1) throw e; }
 	throw new Error("Cannot access file " + path);
 }

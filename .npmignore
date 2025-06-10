@@ -11,6 +11,7 @@ node_modules
 *.jsx
 _book
 book.json
+v8.log
 tmp
 *.[tT][xX][tT]
 *.[cC][sS][vV]
@@ -19,6 +20,7 @@ tmp
 *.[pP][mM][dD]*
 *.[pP][dD][fF]
 *.[sS][lL][kK]
+*.[sS][yY][lL][kK]
 *.socialcalc
 *.[xX][lL][sSwWcCaAtTmMrR]
 *.[xX][lL][sSaAtT][xXmMbB]
@@ -32,6 +34,7 @@ tmp
 *.[fF][mM][3tT]
 *.[bB][iI][fF][fF][23458]
 *.[rR][tT][fF]
+*.[eE][tT]
 *.[eE][tT][hH]
 *.[nN][uU][mM][bB][eE][rR][sS]
 *.[mM][oO][dD]

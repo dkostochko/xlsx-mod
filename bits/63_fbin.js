@@ -68,8 +68,7 @@ function write_FormulaValue(value) {
 /* [MS-XLS] 2.4.127 TODO */
 function parse_Formula(blob, length, opts) {
 	var end = blob.l + length;
-	var cell = parse_XLSCell(blob, 6);
-	if(opts.biff == 2) ++blob.l;
+	var cell = parse_XLSCell(blob, 6, opts);
 	var val = parse_FormulaValue(blob,8);
 	var flags = blob.read_shift(1);
 	if(opts.biff != 2) {
@@ -263,7 +262,7 @@ function write_XLSBFormulaRangeWS(_str, wb) {
 	var sname = _str.slice(0, lastbang);
 	_str = _str.slice(lastbang+1);
 	if(sname.charAt(0) == "'") sname = sname.slice(1, -1).replace(/''/g, "'");
-	var parts = _str.split(":"); str = parts[0];
+	var parts = _str.split(":");
 
 	var out = new_buf(27);
 	out.write_shift(4, 19);

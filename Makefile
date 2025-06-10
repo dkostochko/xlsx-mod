@@ -67,10 +67,9 @@ clean-data:
 
 .PHONY: init
 init: ## Initial setup for development
-	git submodule init
-	git submodule update
-	#git submodule foreach git pull origin master
-	git submodule foreach make all
+	rm -rf test_files
+	if [ ! -e test_files.zip ]; then curl -LO https://test-files.sheetjs.com/test_files.zip; fi
+	unzip -q test_files.zip
 	mkdir -p tmp
 
 DISTHDR=misc/suppress_export.js
@@ -106,12 +105,13 @@ dist-deps: ## Copy dependencies for distribution
 .PHONY: aux
 aux: $(AUXTARGETS)
 
-BYTEFILEC=dist/xlsx.{full,core,mini}.min.js
-BYTEFILER=dist/xlsx.extendscript.js xlsx.mjs
+BYTEFILEC=dist/xlsx.{full,core,mini}.min.js xlsx.mjs
+BYTEFILER=dist/xlsx.extendscript.js
 .PHONY: bytes
 bytes: ## Display minified and gzipped file sizes
 	@for i in $(BYTEFILEC); do npx printj "%-30s %7d %10d" $$i $$(wc -c < $$i) $$(gzip --best --stdout $$i | wc -c); done
 	@for i in $(BYTEFILER); do npx printj "%-30s %7d" $$i $$(wc -c < $$i); done
+	@npx printj "%-30s         %10d" "treeshake" "$$(npx -y esbuild@0.14.14 --bundle misc/import.js | wc -c)"
 
 
 .PHONY: git
@@ -139,6 +139,10 @@ test mocha: test.js ## Run test suite
 #*                      To run tests for one format, make test_<fmt>
 #*                      To run the core test suite, make test_misc
 
+.PHONY: testdot
+testdot: test.js ## Run test suite using dot reporter
+	mocha -R dot -t 30000
+
 .PHONY: test-esm
 test-esm: test.mjs ## Run Node ESM test suite
 	npx -y mocha@9 -R spec -t 30000 $<
@@ -152,16 +156,21 @@ test-bun: testbun.mjs ## Run Bun test suite
 
 .PHONY: test-deno
 test-deno: test.ts ## Run Deno test suite
-	deno test --allow-env --allow-read --allow-write --config misc/test.deno.jsonc $<
+	deno test --check --allow-env --allow-read --allow-write --config misc/test.deno.jsonc $<
 
 .PHONY: test-denocp
 test-denocp: testnocp.ts ## Run Deno test suite (without codepage)
-	deno test --allow-env --allow-read --allow-write --config misc/test.deno.jsonc $<
+	deno test --check --allow-env --allow-read --allow-write --config misc/test.deno.jsonc $<
 
 TESTFMT=$(patsubst %,test_%,$(FMT))
 .PHONY: $(TESTFMT)
 $(TESTFMT): test_%:
 	FMTS=$* make test
+
+TESTFMT=$(patsubst %,testdot_%,$(FMT))
+.PHONY: $(TESTFMT)
+$(TESTFMT): testdot_%:
+	FMTS=$* make testdot
 
 TESTESMFMT=$(patsubst %,test-esm_%,$(FMT))
 .PHONY: $(TESTESMFMT)
@@ -202,7 +211,8 @@ fullint: lint mdlint ## Run all checks (removed: old-lint, tslint, flow)
 
 .PHONY: lint
 lint: $(TARGET) $(AUXTARGETS) ## Run eslint checks
-	@./node_modules/.bin/eslint --ext .js,.njs,.json,.html,.htm $(FLOWTARGET) $(AUXTARGETS) $(CMDS) $(HTMLLINT) package.json bower.json
+	@./node_modules/.bin/eslint $(FLOWTARGET)
+	@./node_modules/.bin/eslint --ext .js,.njs,.json,.html,.htm $(AUXTARGETS) $(CMDS) $(HTMLLINT) package.json bower.json
 	@if [ -x "$(CLOSURE)" ]; then java -jar $(CLOSURE) $(REQS) $(FLOWTARGET) --jscomp_warning=reportUnknownTypes >/dev/null; fi
 
 .PHONY: old-lint
@@ -244,8 +254,7 @@ misc/coverage.html: $(TARGET) test.js
 coveralls: ## Coverage Test + Send to coveralls.io
 	mocha --require blanket --reporter mocha-lcov-reporter -t 30000 | node ./node_modules/coveralls/bin/coveralls.js
 
-DEMOMDS=$(sort $(wildcard demos/*/README.md))
-MDLINT=$(DEMOMDS) README.md demos/README.md
+MDLINT=README.md
 .PHONY: mdlint
 mdlint: $(MDLINT) ## Check markdown documents
 	./node_modules/.bin/alex $^

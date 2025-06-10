@@ -8,9 +8,7 @@ function write_csv_stream(sheet/*:Worksheet*/, opts/*:?Sheet2CSVOpts*/) {
 	var r = safe_decode_range(sheet["!ref"]);
 	var FS = o.FS !== undefined ? o.FS : ",", fs = FS.charCodeAt(0);
 	var RS = o.RS !== undefined ? o.RS : "\n", rs = RS.charCodeAt(0);
-	var endregex = new RegExp((FS=="|" ? "\\|" : FS)+"+$");
 	var row/*:?string*/ = "", cols/*:Array<string>*/ = [];
-	o.dense = Array.isArray(sheet);
 	var colinfo/*:Array<ColInfo>*/ = o.skipHidden && sheet["!cols"] || [];
 	var rowinfo/*:Array<RowInfo>*/ = o.skipHidden && sheet["!rows"] || [];
 	for(var C = r.s.c; C <= r.e.c; ++C) if (!((colinfo[C]||{}).hidden)) cols[C] = encode_col(C);
@@ -23,7 +21,6 @@ function write_csv_stream(sheet/*:Worksheet*/, opts/*:?Sheet2CSVOpts*/) {
 			if ((rowinfo[R-1]||{}).hidden) continue;
 			row = make_csv_row(sheet, r, R-1, cols, fs, rs, FS, o);
 			if(row != null) {
-				if(o.strip) row = row.replace(endregex,"");
 				if(row || (o.blankrows !== false)) return stream.push((w++ ? RS : "") + row);
 			}
 		}
@@ -40,7 +37,6 @@ function write_html_stream(ws/*:Worksheet*/, opts/*:?Sheet2HTMLOpts*/) {
 	var footer = o.footer != null ? o.footer : HTML_END;
 	stream.push(header);
 	var r = decode_range(ws['!ref']);
-	o.dense = Array.isArray(ws);
 	stream.push(make_html_preamble(ws, r, o));
 	var R = r.s.r;
 	var end = false;
@@ -78,16 +74,16 @@ function write_json_stream(sheet/*:Worksheet*/, opts/*:?Sheet2CSVOpts*/) {
 	var rr = encode_row(r.s.r);
 	var cols/*:Array<string>*/ = [];
 	var counter = 0;
-	var dense = Array.isArray(sheet);
+	var dense = sheet["!data"] != null;
 	var R = r.s.r, C = 0;
 	var header_cnt = {};
-	if(dense && !sheet[R]) sheet[R] = [];
+	if(dense && !sheet["!data"][R]) sheet["!data"][R] = [];
 	var colinfo/*:Array<ColInfo>*/ = o.skipHidden && sheet["!cols"] || [];
 	var rowinfo/*:Array<RowInfo>*/ = o.skipHidden && sheet["!rows"] || [];
 	for(C = r.s.c; C <= r.e.c; ++C) {
 		if(((colinfo[C]||{}).hidden)) continue;
 		cols[C] = encode_col(C);
-		val = dense ? sheet[R][C] : sheet[cols[C] + rr];
+		val = dense ? sheet["!data"][R][C] : sheet[cols[C] + rr];
 		switch(header) {
 			case 1: hdr[C] = C - r.s.c; break;
 			case 2: hdr[C] = cols[C]; break;
@@ -108,7 +104,7 @@ function write_json_stream(sheet/*:Worksheet*/, opts/*:?Sheet2CSVOpts*/) {
 	stream._read = function() {
 		while(R <= r.e.r) {
 			if ((rowinfo[R-1]||{}).hidden) continue;
-			var row = make_json_row(sheet, r, R, cols, header, hdr, dense, o);
+			var row = make_json_row(sheet, r, R, cols, header, hdr, o);
 			++R;
 			if((row.isempty === false) || (header === 1 ? o.blankrows !== false : !!o.blankrows)) {
 				stream.push(row.row);

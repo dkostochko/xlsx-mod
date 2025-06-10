@@ -53,6 +53,7 @@ function run() {
     .option('-F, --field-sep <sep>', 'CSV field separator', ",")
     .option('-R, --row-sep <sep>', 'CSV row separator', "\n")
     .option('-n, --sheet-rows <num>', 'Number of rows to process (0=all rows)')
+    .option('--date-format <string>', 'output date format, for example yyyy-mm-dd')
     .option('--codepage <cp>', 'default to specified codepage when ambiguous')
     .option('--req <module>', 'require module before processing')
     .option('--sst', 'generate shared string table for XLS* formats')
@@ -148,6 +149,7 @@ function run() {
   }
   if (program.sparse) opts.dense = false; else opts.dense = true;
   if (program.codepage) opts.codepage = +program.codepage;
+  if (program.dateFormat) opts.dateNF = program.dateFormat;
 
   if (program.dev) {
     opts.WTF = true;
