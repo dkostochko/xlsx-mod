@@ -5,7 +5,7 @@
 		"File": "readonly"
 	},
 	"parserOptions": {
-		"ecmaVersion": 3
+		"ecmaVersion": 2020
 	},
 	"plugins": [ "html", "json" ],
 	"extends": "eslint:recommended",
