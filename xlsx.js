@@ -16035,8 +16035,7 @@ function parse_ws_xml_cols(columns, cols, s) {
 			var style = parseInt(coll.style, 10);
 			var last = colRanges[colRanges.length - 1];
 			if (
-				last &&
-				last.style === style &&
+				last?.style === style &&
 				colm <= last.to + 1
 			) {
 				last.to = Math.max(last.to, colM);
@@ -16230,7 +16229,7 @@ return function parse_ws_xml_data(sdata, s, opts, guess, themes, styles, wb) {
 			var style = parseInt(tag.s, 10);
 			var last = rowRanges.at(-1);
 
-			if (last && last.style === style && tagRowIndex <= last.to + 1) {
+			if (last?.style === style && tagRowIndex <= last.to + 1) {
 				last.to = tagRowIndex;
 			} else {
 				rowRanges.push({ from: tagRowIndex, to: tagRowIndex, style: style });
