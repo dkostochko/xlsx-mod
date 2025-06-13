@@ -1,69 +1,56 @@
-/* 18.8.5 borders CT_Borders */
 function parse_borders(t, styles, themes, opts) {
 	styles.Borders = [];
-	var border = {};
+	var border = null;
 	var pass = false;
+	var currentProp = null;
 	(t[0].match(tagregex)||[]).forEach(function(x) {
 		var y = parsexmltag(x);
 		switch(strip_ns(y[0])) {
 			case '<borders': case '<borders>': case '</borders>': break;
-
-			/* 18.8.4 border CT_Border */
 			case '<border': case '<border>': case '<border/>':
-				border = /*::(*/{}/*:: :any)*/;
-				if(y.diagonalUp) border.diagonalUp = parsexmlbool(y.diagonalUp);
-				if(y.diagonalDown) border.diagonalDown = parsexmlbool(y.diagonalDown);
-				styles.Borders.push(border);
+				border = {};
 				break;
-			case '</border>': break;
-
-			/* note: not in spec, appears to be CT_BorderPr */
-			case '<left/>': break;
-			case '<left': case '<left>': break;
-			case '</left>': break;
-
-			/* note: not in spec, appears to be CT_BorderPr */
-			case '<right/>': break;
-			case '<right': case '<right>': break;
-			case '</right>': break;
-
-			/* 18.8.43 top CT_BorderPr */
-			case '<top/>': break;
-			case '<top': case '<top>': break;
-			case '</top>': break;
-
-			/* 18.8.6 bottom CT_BorderPr */
-			case '<bottom/>': break;
-			case '<bottom': case '<bottom>': break;
-			case '</bottom>': break;
-
-			/* 18.8.13 diagonal CT_BorderPr */
-			case '<diagonal': case '<diagonal>': case '<diagonal/>': break;
-			case '</diagonal>': break;
-
-			/* 18.8.25 horizontal CT_BorderPr */
-			case '<horizontal': case '<horizontal>': case '<horizontal/>': break;
-			case '</horizontal>': break;
-
-			/* 18.8.44 vertical CT_BorderPr */
-			case '<vertical': case '<vertical>': case '<vertical/>': break;
-			case '</vertical>': break;
-
-			/* 18.8.37 start CT_BorderPr */
-			case '<start': case '<start>': case '<start/>': break;
-			case '</start>': break;
-
-			/* 18.8.16 end CT_BorderPr */
-			case '<end': case '<end>': case '<end/>': break;
-			case '</end>': break;
-
-			/* 18.8.? color CT_Color */
-			case '<color': case '<color>':
+			case '</border>':
+				if (border) styles.Borders.push(border);
+				border = null;
 				break;
-			case '<color/>': case '</color>': break;
-
-			/* 18.2.10 extLst CT_ExtensionList ? */
-			case '<extLst': case '<extLst>': case '</extLst>': break;
+			case '<left': case '<left>':
+				currentProp = 'left';
+				border.left = {};
+				if (y.style) border.left.style = y.style;
+				break;
+			case '<right': case '<right>':
+				currentProp = 'right';
+				border.right = {};
+				if (y.style) border.right.style = y.style;
+				break;
+			case '<top': case '<top>':
+				currentProp = 'top';
+				border.top = {};
+				if (y.style) border.top.style = y.style;
+				break;
+			case '<bottom': case '<bottom>':
+				currentProp = 'bottom';
+				border.bottom = {};
+				if (y.style) border.bottom.style = y.style;
+				break;
+			case '<diagonal': case '<diagonal>':
+				currentProp = 'diagonal';
+				border.diagonal = {};
+				if (y.style) border.diagonal.style = y.style;
+				break;
+			case '<color':
+				if (currentProp && border[currentProp]) {
+					if (y.indexed) border[currentProp].color = { indexed: parseInt(y.indexed, 10) };
+					if (y.rgb) border[currentProp].color = { rgb: y.rgb };
+				}
+				break;
+			case '</left>': case '</right>': case '</top>': case '</bottom>': case '</diagonal>':
+				currentProp = null;
+				break;
+			case '<left/>': case '<right/>': case '<top/>': case '<bottom/>': case '<diagonal/>':
+				currentProp = null;
+				break;
 			case '<ext': pass = true; break;
 			case '</ext>': pass = false; break;
 			default: if(opts && opts.WTF) {
