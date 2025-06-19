@@ -229,7 +229,7 @@ function getColor(colorInfo, styles){
     return [color ? color.toLowerCase() : color, tintedColor ? tintedColor.toLowerCase() : tintedColor];
 }
 
-function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, opts, themes, styles, cellFormat, date1904) {
+function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, borderId, opts, themes, styles, cellFormat, date1904) {
 	try {
 		if(opts.cellNF) p.z = table_fmt[fmtid];
 	} catch(e) { if(opts.WTF) throw e; }
@@ -262,6 +262,9 @@ function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, opts, the
 		if (cellFormat.applyAlignment) {
 			p.alignment = cellFormat.alignment;
 		}
+	}
+	if (borderId && cellFormat?.applyBorder) {
+		p.borderId = borderId;
 	}
 	if(fillid != null) try {
 		p.s =  styles.Fills[fillid];

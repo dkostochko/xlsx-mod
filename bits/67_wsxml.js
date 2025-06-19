@@ -356,7 +356,7 @@ return function parse_ws_xml_data(sdata/*:string*/, s, opts, guess/*:Range*/, th
 	var ri = 0, x = "", cells/*:Array<string>*/ = [], cref/*:?Array<string>*/ = [], idx=0, i=0, cc=0, d="", p/*:any*/;
 	var tag, tagr = 0, tagc = 0;
 	var sstr, ftag;
-	var fmtid = 0, fillid = 0;
+	var fmtid = 0, fillid = 0, borderId = 0;
 	var do_format = Array.isArray(styles.CellXf), cf;
 	var arrayf/*:Array<[Range, string]>*/ = [];
 	var sharedf = [];
@@ -537,10 +537,11 @@ return function parse_ws_xml_data(sdata/*:string*/, s, opts, guess/*:Range*/, th
 					if(cf.numFmtId != null) fmtid = cf.numFmtId;
 					if(opts.cellStyles) {
 						if(cf.fillId != null) fillid = cf.fillId;
+						if(cf.borderId != null) borderId = cf.borderId;
 					}
 				}
 			}
-			safe_format(p, fmtid, fillid, opts, themes, styles, cf, date1904);
+			safe_format(p, fmtid, fillid, borderId, opts, themes, styles, cf, date1904);
             if(opts.cellDates && do_format && p.t == 'n' && fmt_is_date(table_fmt[fmtid])) { p.v = numdate(p.v + (date1904 ? 1462 : 0)); p.t = typeof p.v == "number" ? 'n' : 'd'; }
 			if(tag.cm && opts.xlmeta) {
 				var cm = (opts.xlmeta.Cell||[])[+tag.cm-1];
