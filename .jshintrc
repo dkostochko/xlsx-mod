@@ -1,4 +1,5 @@
 {
 	"bitwise": false,
-	"curly": false
+	"curly": false,
+	"esversion": 11
 }

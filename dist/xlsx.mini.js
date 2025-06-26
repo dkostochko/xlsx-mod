@@ -7194,7 +7194,11 @@ function parse_fills(t, styles, themes, opts) {
 				if(y.theme) fill.fgColor.theme = parseInt(y.theme, 10);
 				if(y.tint) fill.fgColor.tint = parseFloat(y.tint);
 				/* Excel uses ARGB strings */
-				if(y.rgb != null) fill.fgColor.rgb = y.rgb.slice(-6);
+				if(y.rgb != null) {
+					fill.fgColor.rgb = y.rgb.slice(-6);
+				} else {
+					fill.fgColor.rgb = rgb_tint(themes.themeElements.clrScheme[fill.fgColor.theme].rgb, fill.fgColor.tint || 0);
+				}
 				break;
 			case '<fgColor/>': case '</fgColor>': break;
 
@@ -8737,7 +8741,7 @@ function parse_ws_xml(data, opts, idx, rels, wb, themes, styles) {
 	if(opts.cellStyles) {
 		/* 18.3.1.13 col CT_Col */
 		var cols = data1.match(colregex);
-		if(cols) parse_ws_xml_cols(columns, cols);
+		if(cols) parse_ws_xml_cols(columns, cols, s);
 	}
 
 	/* 18.3.1.80 sheetData CT_SheetData ? */
@@ -8882,19 +8886,47 @@ function write_ws_xml_margins(margin) {
 	return writextag('pageMargins', null, margin);
 }
 
-function parse_ws_xml_cols(columns, cols) {
+function parse_ws_xml_cols(columns, cols, s) {
 	var seencol = false;
-	for(var coli = 0; coli != cols.length; ++coli) {
+	var colRanges = [];
+	for (var coli = 0; coli != cols.length; ++coli) {
 		var coll = parsexmltag(cols[coli], true);
-		if(coll.hidden) coll.hidden = parsexmlbool(coll.hidden);
-		var colm=parseInt(coll.min, 10)-1, colM=parseInt(coll.max,10)-1;
-		if(coll.outlineLevel) coll.level = (+coll.outlineLevel || 0);
-		delete coll.min; delete coll.max; coll.width = +coll.width;
-		if(!seencol && coll.width) { seencol = true; find_mdw_colw(coll.width); }
+		if (coll.hidden) coll.hidden = parsexmlbool(coll.hidden);
+		var colm = parseInt(coll.min, 10) - 1,
+			colM = parseInt(coll.max, 10) - 1;
+		if (coll.style) {
+			var style = parseInt(coll.style, 10);
+			var last = colRanges[colRanges.length - 1];
+			if (
+				last?.style === style &&
+				colm <= last.to + 1
+			) {
+				last.to = Math.max(last.to, colM);
+			} else {
+				colRanges.push({ from: colm, to: colM, style: style });
+			}
+		}
+		if (coll.outlineLevel) coll.level = +coll.outlineLevel || 0;
+		delete coll.min;
+		delete coll.max;
+		coll.width = +coll.width;
+		if (!seencol && coll.width) {
+			seencol = true;
+			find_mdw_colw(coll.width);
+		}
 		process_col(coll);
-		while(colm <= colM) columns[colm++] = dup(coll);
+		while (colm <= colM) columns[colm++] = dup(coll);
+	}
+
+	if (colRanges.length > 0) {
+		var colStyles = {};
+		colRanges.forEach(function (r) {
+			colStyles[r.from + "-" + r.to] = r.style;
+		});
+		s["!colStyles"] = colRanges;
 	}
 }
+
 function write_ws_xml_cols(ws, cols) {
 	var o = ["<cols>"], col;
 	for(var i = 0; i != cols.length; ++i) {
@@ -9006,7 +9038,7 @@ function write_ws_xml_cell(cell, ref, ws, opts, idx, wb, date1904) {
 }
 
 var parse_ws_xml_data = (function() {
-	var cellregex = /<(?:\w+:)?c[ \/>]/, rowregex = /<\/(?:\w+:)?row>/;
+	var cellregex = /<(?:\w+:)?c[ \/>]/, rowregex = /<\w*:?row\b[^>]*\/>|<\w*:?row\b[^>]*>[\s\S]*?<\/\w*:?row>/g;
 	var rregex = /r=["']([^"']*)["']/, isregex = /<(?:\w+:)?is>([\S\s]*?)<\/(?:\w+:)?is>/;
 	var refregex = /ref=["']([^"']*)["']/;
 
@@ -9022,7 +9054,8 @@ return function parse_ws_xml_data(sdata, s, opts, guess, themes, styles, wb) {
 	var rows = [], rowobj = {}, rowrite = false;
 	var sheetStubs = !!opts.sheetStubs;
 	var date1904 = !!((wb||{}).WBProps||{}).date1904;
-	for(var marr = sdata.split(rowregex), mt = 0, marrlen = marr.length; mt != marrlen; ++mt) {
+	var rowRanges = [];
+	for(var marr = sdata.match(rowregex), mt = 0, marrlen = marr.length; mt != marrlen; ++mt) {
 		x = marr[mt].trim();
 		var xlen = x.length;
 		if(xlen === 0) continue;
@@ -9053,6 +9086,17 @@ return function parse_ws_xml_data(sdata, s, opts, guess, themes, styles, wb) {
 		if(!opts.nodim) {
 			if(guess.s.r > tagr - 1) guess.s.r = tagr - 1;
 			if(guess.e.r < tagr - 1) guess.e.r = tagr - 1;
+		}
+		if (tag.s) {
+			var tagRowIndex = tagr - 1;
+			var style = parseInt(tag.s, 10);
+			var last = rowRanges.at(-1);
+
+			if (last?.style === style && tagRowIndex <= last.to + 1) {
+				last.to = tagRowIndex;
+			} else {
+				rowRanges.push({ from: tagRowIndex, to: tagRowIndex, style: style });
+			}
 		}
 
 		if(opts && opts.cellStyles) {
@@ -9206,6 +9250,9 @@ return function parse_ws_xml_data(sdata, s, opts, guess, themes, styles, wb) {
 		}
 	}
 	if(rows.length > 0) s['!rows'] = rows;
+	if(Object.keys(rowRanges).length > 0) {
+		s['!rowStyles'] = rowRanges;
+	}
 }; })();
 
 function write_ws_xml_data(ws, opts, idx, wb) {

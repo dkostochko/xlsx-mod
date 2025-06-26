@@ -77,19 +77,19 @@ DISTHDR=misc/suppress_export.js
 dist: dist-deps $(TARGET) bower.json ## Prepare JS files for distribution
 	mkdir -p dist
 	cp LICENSE dist/
-	uglifyjs shim.js $(UGLIFYOPTS) -o dist/shim.min.js
+	terser shim.js $(UGLIFYOPTS) -o dist/shim.min.js
 	@#
 	<$(TARGET) sed "s/require('.*')/undefined/g;s/ process / undefined /g;s/process.versions/({})/g" > dist/$(TARGET)
 	<$(MINITGT) sed "s/require('.*')/undefined/g;s/ process / undefined /g;s/process.versions/({})/g" > dist/$(MINITGT)
 	@# core
-	uglifyjs $(REQS) dist/$(TARGET) $(UGLIFYOPTS) -o dist/$(LIB).core.min.js --source-map
+	terser $(REQS) dist/$(TARGET) $(UGLIFYOPTS) -o dist/$(LIB).core.min.js --source-map
 	misc/strip_sourcemap.sh dist/$(LIB).core.min.js
 	@# full
 	#cat <(head -n 1 bits/00_header.js) $(DISTHDR) $(REQS) $(ADDONS) dist/$(TARGET) $(AUXTARGETS) > dist/$(LIB).full.js
-	uglifyjs $(DISTHDR) $(REQS) $(ADDONS) dist/$(TARGET) $(AUXTARGETS) $(UGLIFYOPTS) -o dist/$(LIB).full.min.js --source-map
+	terser $(DISTHDR) $(REQS) $(ADDONS) dist/$(TARGET) $(AUXTARGETS) $(UGLIFYOPTS) -o dist/$(LIB).full.min.js --source-map
 	misc/strip_sourcemap.sh dist/$(LIB).full.min.js
 	@# mini
-	uglifyjs dist/$(MINITGT) $(UGLIFYOPTS) -o dist/$(LIB).mini.min.js --source-map
+	terser dist/$(MINITGT) $(UGLIFYOPTS) -o dist/$(LIB).mini.min.js --source-map
 	@# extendscript
 	cat <(printf '\xEF\xBB\xBF') <(head -n 1 bits/00_header.js) shim.js $(DISTHDR) $(REQS) dist/$(TARGET) > dist/$(LIB).extendscript.js
 	@# zahl

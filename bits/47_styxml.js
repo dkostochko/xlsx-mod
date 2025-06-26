@@ -116,7 +116,11 @@ function parse_fills(t, styles, themes, opts) {
 				if(y.theme) fill.fgColor.theme = parseInt(y.theme, 10);
 				if(y.tint) fill.fgColor.tint = parseFloat(y.tint);
 				/* Excel uses ARGB strings */
-				if(y.rgb != null) fill.fgColor.rgb = y.rgb.slice(-6);
+				if(y.rgb != null) {
+					fill.fgColor.rgb = y.rgb.slice(-6);
+				} else {
+					fill.fgColor.rgb = rgb_tint(themes.themeElements.clrScheme[fill.fgColor.theme].rgb, fill.fgColor.tint || 0);
+				}
 				break;
 			case '<fgColor/>': case '</fgColor>': break;
 
