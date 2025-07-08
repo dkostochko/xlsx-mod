@@ -1,75 +1,48 @@
-/* 18.8.5 borders CT_Borders */
 function parse_borders(t, styles, themes, opts) {
 	styles.Borders = [];
-	var border = {};
-	var pass = false;
-	(t[0].match(tagregex)||[]).forEach(function(x) {
-		var y = parsexmltag(x);
-		switch(strip_ns(y[0])) {
-			case '<borders': case '<borders>': case '</borders>': break;
+	let border = null;
+	let currentProp = null;
+	let pass = false;
 
-			/* 18.8.4 border CT_Border */
-			case '<border': case '<border>': case '<border/>':
-				border = /*::(*/{}/*:: :any)*/;
-				if(y.diagonalUp) border.diagonalUp = parsexmlbool(y.diagonalUp);
-				if(y.diagonalDown) border.diagonalDown = parsexmlbool(y.diagonalDown);
-				styles.Borders.push(border);
-				break;
-			case '</border>': break;
+	const tagGroups = {
+		ignoredTags: ["<borders", "<borders/>", "</borders>"],
+		borderTags: ["<border", "<border>", "<border/>"],
+		endBorderTags: ["</border>"],
+		sideTags: ["<left", "<right", "<top", "<bottom", "<diagonal"],
+		endSideTags: ["</left>", "</right>", "</top>", "</bottom>", "</diagonal>"],
+		selfClosingSideTags: ["<left/>", "<right/>", "<top/>", "<bottom/>", "<diagonal/>"]
+	};
 
-			/* note: not in spec, appears to be CT_BorderPr */
-			case '<left/>': break;
-			case '<left': case '<left>': break;
-			case '</left>': break;
-
-			/* note: not in spec, appears to be CT_BorderPr */
-			case '<right/>': break;
-			case '<right': case '<right>': break;
-			case '</right>': break;
-
-			/* 18.8.43 top CT_BorderPr */
-			case '<top/>': break;
-			case '<top': case '<top>': break;
-			case '</top>': break;
-
-			/* 18.8.6 bottom CT_BorderPr */
-			case '<bottom/>': break;
-			case '<bottom': case '<bottom>': break;
-			case '</bottom>': break;
-
-			/* 18.8.13 diagonal CT_BorderPr */
-			case '<diagonal': case '<diagonal>': case '<diagonal/>': break;
-			case '</diagonal>': break;
-
-			/* 18.8.25 horizontal CT_BorderPr */
-			case '<horizontal': case '<horizontal>': case '<horizontal/>': break;
-			case '</horizontal>': break;
-
-			/* 18.8.44 vertical CT_BorderPr */
-			case '<vertical': case '<vertical>': case '<vertical/>': break;
-			case '</vertical>': break;
-
-			/* 18.8.37 start CT_BorderPr */
-			case '<start': case '<start>': case '<start/>': break;
-			case '</start>': break;
-
-			/* 18.8.16 end CT_BorderPr */
-			case '<end': case '<end>': case '<end/>': break;
-			case '</end>': break;
-
-			/* 18.8.? color CT_Color */
-			case '<color': case '<color>':
-				break;
-			case '<color/>': case '</color>': break;
-
-			/* 18.2.10 extLst CT_ExtensionList ? */
-			case '<extLst': case '<extLst>': case '</extLst>': break;
-			case '<ext': pass = true; break;
-			case '</ext>': pass = false; break;
-			default: if(opts && opts.WTF) {
-				if(!pass) throw new Error('unrecognized ' + y[0] + ' in borders');
-			}
+	const handleTag = (tag, y) => {
+		if (tagGroups.ignoredTags.includes(tag)) {
+			return;
 		}
+		if (tagGroups.borderTags.includes(tag)) {
+			border = {};
+		} else if (tagGroups.endBorderTags.includes(tag)) {
+			if (border) {
+				styles.Borders.push(border);
+			}
+			border = null;
+		} else if (tagGroups.sideTags.includes(tag)) {
+			currentProp = tag.slice(1);
+			border[currentProp] = y.style ? { style: y.style } : {};
+		} else if (tagGroups.endSideTags.includes(tag) || tagGroups.selfClosingSideTags.includes(tag)) {
+			currentProp = null;
+		} else if (tag === "<color" && currentProp && border[currentProp]) {
+			border[currentProp].color = parseColor(y, themes);
+		} else if (tag === "<ext") {
+			pass = true;
+		} else if (tag === "</ext") {
+			pass = false;
+		} else if (opts?.WTF && !pass) {
+			throw new Error(`Unrecognized tag: ${y[0]} in borders`);
+		}
+	};
+
+	(t[0].match(tagregex) || []).forEach(x => {
+		const y = parsexmltag(x);
+		handleTag(strip_ns(y[0]), y);
 	});
 }
 
@@ -101,26 +74,13 @@ function parse_fills(t, styles, themes, opts) {
 
 			/* 18.8.3 bgColor CT_Color */
 			case '<bgColor':
-				if(!fill.bgColor) fill.bgColor = {};
-				if(y.indexed) fill.bgColor.indexed = parseInt(y.indexed, 10);
-				if(y.theme) fill.bgColor.theme = parseInt(y.theme, 10);
-				if(y.tint) fill.bgColor.tint = parseFloat(y.tint);
-				/* Excel uses ARGB strings */
-				if(y.rgb) fill.bgColor.rgb = y.rgb.slice(-6);
+				fill.bgColor = parseColor(y, themes);
 				break;
 			case '<bgColor/>': case '</bgColor>': break;
 
 			/* 18.8.19 fgColor CT_Color */
 			case '<fgColor':
-				if(!fill.fgColor) fill.fgColor = {};
-				if(y.theme) fill.fgColor.theme = parseInt(y.theme, 10);
-				if(y.tint) fill.fgColor.tint = parseFloat(y.tint);
-				/* Excel uses ARGB strings */
-				if(y.rgb != null) {
-					fill.fgColor.rgb = y.rgb.slice(-6);
-				} else {
-					fill.fgColor.rgb = rgb_tint(themes.themeElements.clrScheme[fill.fgColor.theme].rgb, fill.fgColor.tint || 0);
-				}
+				fill.fgColor = parseColor(y, themes);
 				break;
 			case '<fgColor/>': case '</fgColor>': break;
 
@@ -227,24 +187,7 @@ function parse_fonts(t, styles, themes, opts) {
 
 			/* 18.?.? color CT_Color */
 			case '<color':
-				if(!font.color) font.color = {};
-				if(y.auto) font.color.auto = parsexmlbool(y.auto);
-
-				if(y.rgb) font.color.rgb = y.rgb.slice(-6);
-				else if(y.indexed) {
-					font.color.index = parseInt(y.indexed, 10);
-					var icv = XLSIcv[font.color.index];
-					if(font.color.index == 81) icv = XLSIcv[1];
-					if(!icv) icv = XLSIcv[1]; //throw new Error(x); // note: 206 is valid
-					font.color.rgb = icv[0].toString(16) + icv[1].toString(16) + icv[2].toString(16);
-				} else if(y.theme) {
-					font.color.theme = parseInt(y.theme, 10);
-					if(y.tint) font.color.tint = parseFloat(y.tint);
-					if(y.theme && themes.themeElements && themes.themeElements.clrScheme) {
-						font.color.rgb = rgb_tint(themes.themeElements.clrScheme[font.color.theme].rgb, font.color.tint || 0);
-					}
-				}
-
+				font.color = parseColor(y, themes);
 				break;
 			case '<color/>': case '</color>': break;
 
