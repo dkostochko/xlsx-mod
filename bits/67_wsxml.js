@@ -12,6 +12,9 @@ var marginregex= /<(?:\w:)?pageMargins[^>]*\/>/g;
 var sheetprregex = /<(?:\w:)?sheetPr\b(?:[^>a-z][^>]*)?\/>/;
 var sheetprregex2= /<(?:\w:)?sheetPr[^>]*(?:[\/]|>([\s\S]*)<\/(?:\w:)?sheetPr)>/;
 var svsregex = /<(?:\w:)?sheetViews[^>]*(?:[\/]|>([\s\S]*)<\/(?:\w:)?sheetViews)>/;
+var cfregex = /<(?:\w:)?conditionalFormatting\b[^>]*>[\s\S]*?<\/(?:\w:)?conditionalFormatting>/g;
+var cfruleregex = /<(?:\w:)?cfRule\b[^>]*(?:\/>|>[\s\S]*?<\/(?:\w:)?cfRule>)/g;
+var formularegex = /<(?:\w:)?formula>([\s\S]*?)<\/(?:\w:)?formula>/g;
 
 /* 18.3 Worksheets */
 function parse_ws_xml(data/*:?string*/, opts, idx/*:number*/, rels, wb/*:WBWBProps*/, themes, styles)/*:Worksheet*/ {
@@ -74,6 +77,9 @@ function parse_ws_xml(data/*:?string*/, opts, idx/*:number*/, rels, wb/*:WBWBPro
 	/* 18.3.1.62 pageMargins CT_PageMargins */
 	var margins = data2.match(marginregex);
 	if(margins) s['!margins'] = parse_ws_xml_margins(parsexmltag(margins[0]));
+
+	var _cf = parse_ws_xml_conditional_formatting(data2);
+	if(_cf.length) s['!conditionalFormatting'] = _cf;
 
 	/* legacyDrawing */
 	var m;
@@ -196,6 +202,60 @@ function write_ws_xml_margins(margin)/*:string*/ {
 	return writextag('pageMargins', null, margin);
 }
 
+function parse_ws_xml_conditional_formatting(xml) {
+	if (!xml) return [];
+
+	const out = [];
+	let match;
+
+	while ((match = cfregex.exec(xml)) !== null) {
+		const block = match[0];
+		const headEnd = block.indexOf(">");
+		if (headEnd < 0) continue;
+
+		const head = block.slice(0, headEnd + 1);
+		const body = block.slice(headEnd + 1);
+
+		const tag = parsexmltag(head, true);
+		const sqref = (tag.sqref || "").trim();
+		if (!sqref) continue;
+
+		const refs = sqref.split(/\s+/).filter(Boolean);
+		const rules = [];
+
+		(body.match(cfruleregex) || []).forEach(ruleStr => {
+			const rHeadEnd = ruleStr.indexOf(">");
+			const rHead = rHeadEnd >= 0 ? ruleStr.slice(0, rHeadEnd + 1) : ruleStr;
+			const rBody = rHeadEnd >= 0 ? ruleStr.slice(rHeadEnd + 1, ruleStr.lastIndexOf("<")) : "";
+
+			const rtag = parsexmltag(rHead, true);
+			const formulas = [];
+
+			if (rBody) {
+				let formulaMatch;
+				while ((formulaMatch = formularegex.exec(rBody)) !== null) {
+					const formulaText = formulaMatch[1] ? unescapexml(utf8read(formulaMatch[1]), true) : "";
+					if (formulaText) formulas.push(formulaText);
+				}
+			}
+
+			rules.push({
+				type: rtag.type,
+				operator: rtag.operator,
+				dxfId: rtag.dxfId != null ? parseInt(rtag.dxfId, 10) : undefined,
+				priority: rtag.priority != null ? parseInt(rtag.priority, 10) : undefined,
+				stopIfTrue: rtag.stopIfTrue === "1" || rtag.stopIfTrue === "true",
+				raw: rBody || "",
+				formulas
+			});
+		});
+
+		out.push({ sqref: refs, rules });
+	}
+
+	return out;
+}
+
 function parse_ws_xml_cols(columns, cols, s) {
 	var seencol = false;
 	var colRanges = [];
@@ -248,7 +308,7 @@ function write_ws_xml_cols(ws, cols)/*:string*/ {
 }
 
 function parse_ws_xml_autofilter(data/*:string*/) {
-	var o = { ref: (data.match(/ref="([^"]*)"/)||[])[1]};
+	var o = { ref: (data.match(/ref=\"([^\"]*)\"/)||[])[1]};
 	return o;
 }
 function write_ws_xml_autofilter(data, ws, wb, idx)/*:string*/ {
