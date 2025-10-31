@@ -315,10 +315,234 @@ function write_cellXfs(cellXfs)/*:string*/ {
 	return o.join("");
 }
 
+function parse_dxfs(t, styles, themes) {
+	const TAGRE = (typeof tagregex !== 'undefined' && tagregex) || /<[^>]*>/g;
+	const dxfs = [];
+	if (!t || !t[0]) {
+		if (styles) styles.DifferentialFormats = dxfs;
+		return dxfs;
+	}
+
+	const tokens = t[0].match(TAGRE) || [];
+
+	let inDxfs = false;
+	let inDxf = false;
+	let cur = null;
+	let inFont = false;
+	let inFill = false;
+	let inPatternFill = false;
+	let inBorder = false;
+	let borderEdge = null;
+
+	const stripNs = (n) => n.replace(/^[A-Za-z_][\w.-]*:/, "");
+	const parseTag = (tok) => {
+		const isClose = /^<\//.test(tok);
+		const isSelfClose = /\/>$/.test(tok);
+		const m = tok.match(/^<\/*([A-Za-z0-9_:\-]+)(?:\s[^>]*)?\/?>$/);
+		const name = m ? stripNs(m[1]) : "";
+		return { name, isClose, isSelfClose };
+	};
+	const parseAttrs = (tok) => {
+		const out = {};
+		let m;
+		const re = /([A-Za-z_][\w:.-]*)\s*=\s*"([^"]*)"/g;
+		while ((m = re.exec(tok))) {
+			out[stripNs(m[1])] = m[2];
+		}
+		return out;
+	};
+	const num = (v) => (v == null ? undefined : (v.indexOf('.') >= 0 ? parseFloat(v) : parseInt(v, 10)));
+	const bool = (v) => v === "1" || v === "true" || v === "TRUE";
+	const ensure = (obj, key) => {
+		if (!obj[key]) obj[key] = {};
+		return obj[key];
+	};
+
+	tokens.forEach((tok) => {
+		const { name, isClose, isSelfClose } = parseTag(tok);
+		const attrs = isClose ? {} : parseAttrs(tok);
+
+		if (name === "dxfs") {
+			if (!isClose) inDxfs = true;
+			else inDxfs = false;
+			return;
+		}
+
+		if (!inDxfs) return;
+
+		if (name === "dxf") {
+			if (isClose) {
+				if (cur) dxfs.push(cur);
+				cur = null;
+				inDxf = false;
+			} else {
+				inDxf = true;
+				cur = {};
+				if (isSelfClose) {
+					dxfs.push(cur);
+					cur = null;
+					inDxf = false;
+				}
+			}
+			return;
+		}
+
+		if (!inDxf) return;
+
+		if (name === "font") {
+			if (isClose) inFont = false;
+			else {
+				inFont = true;
+				if (!isSelfClose) ensure(cur, "font");
+				else ensure(cur, "font"); // present but empty
+			}
+			return;
+		}
+
+		if (name === "fill") {
+			if (isClose) inFill = false;
+			else {
+				inFill = true;
+				if (isSelfClose) ensure(cur, "fill");
+			}
+			return;
+		}
+		if (name === "patternFill") {
+			if (isClose) inPatternFill = false;
+			else {
+				inPatternFill = true;
+				const f = ensure(cur, "fill");
+				if (attrs.patternType) f.patternType = attrs.patternType;
+			}
+			return;
+		}
+
+		if (name === "border") {
+			if (isClose) {
+				inBorder = false;
+			} else {
+				inBorder = true;
+				ensure(cur, "border");
+			}
+			return;
+		}
+		if (inBorder && (name === "left" || name === "right" || name === "top" || name === "bottom" || name === "diagonal" || name === "vertical" || name === "horizontal")) {
+			if (isClose) {
+				borderEdge = null;
+			} else {
+				borderEdge = name;
+				const b = ensure(cur, "border");
+				if (!b[borderEdge]) b[borderEdge] = {};
+				if (attrs.style) b[borderEdge].style = attrs.style;
+				if (isSelfClose) borderEdge = null;
+			}
+			return;
+		}
+
+		if (inFont) {
+			if (name === "b" && !isClose) {
+				ensure(cur, "font").bold = true;
+				return;
+			}
+			if (name === "i" && !isClose) {
+				ensure(cur, "font").italic = true;
+				return;
+			}
+			if (name === "strike" && !isClose) {
+				ensure(cur, "font").strike = true;
+				return;
+			}
+			if (name === "u" && !isClose) {
+				const v = attrs.val;
+				ensure(cur, "font").underline = v ? v : true;
+				return;
+			}
+			if (name === "color" && !isClose) {
+				ensure(cur, "font").color = {rgb: "#"+parseColor(attrs, themes).rgb};
+				return;
+			}
+			if (name === "sz" && !isClose && attrs.val != null) {
+				ensure(cur, "font").sz = num(attrs.val);
+				return;
+			}
+			if (name === "name" && !isClose && attrs.val != null) {
+				ensure(cur, "font").name = attrs.val;
+				return;
+			}
+			if (name === "family" && !isClose && attrs.val != null) {
+				ensure(cur, "font").family = num(attrs.val);
+				return;
+			}
+			if (name === "charset" && !isClose && attrs.val != null) {
+				ensure(cur, "font").charset = num(attrs.val);
+				return;
+			}
+			if (name === "scheme" && !isClose && attrs.val != null) {
+				ensure(cur, "font").scheme = attrs.val;
+				return;
+			}
+		}
+
+		if (inPatternFill) {
+			if (name === "fgColor" && !isClose) {
+				ensure(cur, "fill").fgColor = {rgb: "#"+parseColor(attrs, themes).rgb};
+				return;
+			}
+			if (name === "bgColor" && !isClose) {
+				ensure(cur, "fill").bgColor = {rgb: "#"+parseColor(attrs, themes).rgb};
+				return;
+			}
+		}
+
+		if (inBorder && borderEdge && name === "color" && !isClose) {
+			const b = ensure(cur, "border");
+			if (!b[borderEdge]) b[borderEdge] = {};
+			b[borderEdge].color = {rgb: "#"+parseColor(attrs, themes).rgb};
+			return;
+		}
+
+		if (name === "alignment" && !isClose) {
+			const a = ensure(cur, "alignment");
+			if (attrs.horizontal) a.horizontal = attrs.horizontal;
+			if (attrs.vertical) a.vertical = attrs.vertical;
+			if (attrs.textRotation != null) a.textRotation = num(attrs.textRotation);
+			if (attrs.wrapText != null) a.wrapText = bool(attrs.wrapText);
+			if (attrs.indent != null) a.indent = num(attrs.indent);
+			if (attrs.shrinkToFit != null) a.shrinkToFit = bool(attrs.shrinkToFit);
+			if (attrs.readingOrder != null) a.readingOrder = num(attrs.readingOrder);
+			return;
+		}
+
+		if (name === "protection" && !isClose) {
+			const p = ensure(cur, "protection");
+			if (attrs.locked != null) p.locked = bool(attrs.locked);
+			if (attrs.hidden != null) p.hidden = bool(attrs.hidden);
+			return;
+		}
+
+		if (name === "numFmt" && !isClose) {
+			const n = {};
+			if (attrs.numFmtId != null) n.numFmtId = num(attrs.numFmtId);
+			if (attrs.formatCode != null) n.formatCode = attrs.formatCode;
+			if (Object.keys(n).length) cur.numFmt = n;
+			return;
+		}
+
+		if (name === "extLst") {
+			return;
+		}
+	});
+
+	if (styles) styles.DifferentialFormats = dxfs;
+	return dxfs;
+}
+
+
 /* 18.8 Styles CT_Stylesheet*/
 var parse_sty_xml= /*#__PURE__*/(function make_pstyx() {
 var numFmtRegex = /<(?:\w+:)?numFmts([^>]*)>[\S\s]*?<\/(?:\w+:)?numFmts>/;
 var cellXfRegex = /<(?:\w+:)?cellXfs([^>]*)>[\S\s]*?<\/(?:\w+:)?cellXfs>/;
+var dxfsRegex = /<(?:\w+:)?dxfs([^>]*)>[\S\s]*?<\/(?:\w+:)?dxfs>/;
 var fillsRegex = /<(?:\w+:)?fills([^>]*)>[\S\s]*?<\/(?:\w+:)?fills>/;
 var fontsRegex = /<(?:\w+:)?fonts([^>]*)>[\S\s]*?<\/(?:\w+:)?fonts>/;
 var bordersRegex = /<(?:\w+:)?borders([^>]*)>[\S\s]*?<\/(?:\w+:)?borders>/;
@@ -347,6 +571,10 @@ return function parse_sty_xml(data, themes, opts) {
 
 	/* 18.8.10 cellXfs CT_CellXfs ? */
 	if((t=data.match(cellXfRegex))) parse_cellXfs(t, styles, opts);
+
+	if((t=data.match(dxfsRegex))) {
+		parse_dxfs(t, styles, themes);
+	}
 
 	/* 18.8.15 dxfs CT_Dxfs ? */
 	/* 18.8.42 tableStyles CT_TableStyles ? */

@@ -78,7 +78,7 @@ function parse_ws_xml(data/*:?string*/, opts, idx/*:number*/, rels, wb/*:WBWBPro
 	var margins = data2.match(marginregex);
 	if(margins) s['!margins'] = parse_ws_xml_margins(parsexmltag(margins[0]));
 
-	var _cf = parse_ws_xml_conditional_formatting(data2);
+	var _cf = parse_ws_xml_conditional_formatting(data2, themes);
 	if(_cf.length) s['!conditionalFormatting'] = _cf;
 
 	/* legacyDrawing */
@@ -202,7 +202,37 @@ function write_ws_xml_margins(margin)/*:string*/ {
 	return writextag('pageMargins', null, margin);
 }
 
-function parse_ws_xml_conditional_formatting(xml) {
+function parseCFVisualBlock(ruleBodyXml, themes) {
+	if (!ruleBodyXml) return null;
+	const m = ruleBodyXml.match(/<(?:colorScale|dataBar)\b[^>]*>([\s\S]*?)<\/(?:colorScale|dataBar)>/i);
+	if (!m) return null;
+
+	const raw = m[0];
+	const inner = m[1] || '';
+
+	const cfvo = [];
+	const cfvoRe = /<cfvo\b[^>]*\/>/gi;
+	let mm;
+	while ((mm = cfvoRe.exec(inner)) !== null) {
+		const tag = parsexmltag(mm[0], true) || {};
+		cfvo.push({
+			type: (tag.type || '').toLowerCase(),
+			val: tag.val != null ? String(tag.val) : undefined,
+		});
+	}
+
+	const colors = [];
+	const colorRe = /<color\b[^>]*\/>/gi;
+	while ((mm = colorRe.exec(inner)) !== null) {
+		const rawTag = parsexmltag(mm[0], true) || {};
+		const parsed = (typeof parseColor === "function") ? parseColor(rawTag, themes) : {};
+		colors.unshift(Object.assign({ raw: rawTag }, parsed));
+	}
+
+	return { raw, cfvo, colors };
+}
+
+function parse_ws_xml_conditional_formatting(xml, themes) {
 	if (!xml) return [];
 
 	const out = [];
@@ -229,7 +259,15 @@ function parse_ws_xml_conditional_formatting(xml) {
 			const rBody = rHeadEnd >= 0 ? ruleStr.slice(rHeadEnd + 1, ruleStr.lastIndexOf("<")) : "";
 
 			const rtag = parsexmltag(rHead, true);
+			const type = rtag.type;
 			const formulas = [];
+			const rank = rtag.rank != null ? parseInt(rtag.rank, 10) : undefined;
+			const percent = rtag.percent != null ? parseInt(rtag.percent, 10) : undefined;
+			const bottom = rtag.bottom != null ? parseInt(rtag.bottom, 10) : undefined;
+
+			const aboveAverage = !Object.prototype.hasOwnProperty.call(rtag, 'aboveAverage');
+			const equalAverage = Object.prototype.hasOwnProperty.call(rtag, 'equalAverage');
+			const stdDev = rtag.stdDev != null ? parseFloat(rtag.stdDev) : null;
 
 			if (rBody) {
 				let formulaMatch;
@@ -239,15 +277,36 @@ function parse_ws_xml_conditional_formatting(xml) {
 				}
 			}
 
-			rules.push({
+			const ruleObj = {
 				type: rtag.type,
 				operator: rtag.operator,
 				dxfId: rtag.dxfId != null ? parseInt(rtag.dxfId, 10) : undefined,
 				priority: rtag.priority != null ? parseInt(rtag.priority, 10) : undefined,
 				stopIfTrue: rtag.stopIfTrue === "1" || rtag.stopIfTrue === "true",
-				raw: rBody || "",
-				formulas
-			});
+				timePeriod: rtag.timePeriod
+			};
+
+			if (formulas.length > 0) {
+				ruleObj.formulas = formulas;
+			}
+
+			if (type === 'top10') {
+				ruleObj.topTen = { rank, percent, bottom };
+			}
+
+			if (type === 'colorScale') {
+				ruleObj.colorScaleParsed = parseCFVisualBlock(rBody, themes);
+			}
+
+			if (type === 'dataBar') {
+				ruleObj.colorScaleParsed = parseCFVisualBlock(rBody, themes);
+			}
+
+			if (type === 'aboveAverage') {
+				ruleObj.aboveAverage = { aboveAverage, equalAverage, stdDev };
+			}
+
+			rules.push(ruleObj);
 		});
 
 		out.push({ sqref: refs, rules });
