@@ -394,7 +394,7 @@ function parse_dxfs(t, styles, themes) {
 			else {
 				inFont = true;
 				if (!isSelfClose) ensure(cur, "font");
-				else ensure(cur, "font"); // present but empty
+				else ensure(cur, "font");
 			}
 			return;
 		}
