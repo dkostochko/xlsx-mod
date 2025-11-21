@@ -353,7 +353,7 @@ function parse_dxfs(t, styles, themes) {
 	const num = (v) => (v == null ? undefined : (v.includes(".") ? parseFloat(v) : parseInt(v, 10)));
 	const bool = (v) => ["1", "true", "TRUE"].includes(v);
 	const ensure = (obj, key) => {
-		if (!obj[key]) obj[key] = {};
+		obj[key] ??= {}
 		return obj[key];
 	};
 
@@ -425,7 +425,7 @@ function parse_dxfs(t, styles, themes) {
 			} else {
 				borderEdge = name;
 				const b = ensure(cur, "border");
-				if (!b[borderEdge]) b[borderEdge] = {};
+				b[borderEdge] ??= {};
 				if (attrs.style) b[borderEdge].style = attrs.style;
 				if (isSelfClose) borderEdge = null;
 			}
@@ -487,7 +487,7 @@ function parse_dxfs(t, styles, themes) {
 
 		if (inBorder && borderEdge && name === "color" && !isClose) {
 			const b = ensure(cur, "border");
-			if (!b[borderEdge]) b[borderEdge] = {};
+			b[borderEdge] ??= {};
 			b[borderEdge].color = {rgb: "#"+parseColor(attrs, themes).rgb};
 			return;
 		}
