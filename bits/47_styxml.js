@@ -316,20 +316,19 @@ function write_cellXfs(cellXfs)/*:string*/ {
 }
 
 function parse_dxfs(t, styles, themes) {
-	const TAGRE = (typeof tagregex !== 'undefined' && tagregex) || /<[^>]*>/g;
+	const TAG_RE = tagregex || /<[^>]*>/g;
 	const dxfs = [];
-	if (!t || !t[0]) {
+	if (!t?.[0]) {
 		if (styles) styles.DifferentialFormats = dxfs;
 		return dxfs;
 	}
 
-	const tokens = t[0].match(TAGRE) || [];
+	const tokens = t[0].match(TAG_RE) || [];
 
 	let inDxfs = false;
 	let inDxf = false;
 	let cur = null;
 	let inFont = false;
-	let inFill = false;
 	let inPatternFill = false;
 	let inBorder = false;
 	let borderEdge = null;
@@ -351,8 +350,8 @@ function parse_dxfs(t, styles, themes) {
 		}
 		return out;
 	};
-	const num = (v) => (v == null ? undefined : (v.indexOf('.') >= 0 ? parseFloat(v) : parseInt(v, 10)));
-	const bool = (v) => v === "1" || v === "true" || v === "TRUE";
+	const num = (v) => (v == null ? undefined : (v.includes(".") ? parseFloat(v) : parseInt(v, 10)));
+	const bool = (v) => ["1", "true", "TRUE"].includes(v);
 	const ensure = (obj, key) => {
 		if (!obj[key]) obj[key] = {};
 		return obj[key];
@@ -363,8 +362,7 @@ function parse_dxfs(t, styles, themes) {
 		const attrs = isClose ? {} : parseAttrs(tok);
 
 		if (name === "dxfs") {
-			if (!isClose) inDxfs = true;
-			else inDxfs = false;
+			inDxfs = !isClose;
 			return;
 		}
 
@@ -393,18 +391,13 @@ function parse_dxfs(t, styles, themes) {
 			if (isClose) inFont = false;
 			else {
 				inFont = true;
-				if (!isSelfClose) ensure(cur, "font");
-				else ensure(cur, "font");
+				ensure(cur, "font");
 			}
 			return;
 		}
 
-		if (name === "fill") {
-			if (isClose) inFill = false;
-			else {
-				inFill = true;
-				if (isSelfClose) ensure(cur, "fill");
-			}
+		if (name === "fill" && !isClose && isSelfClose) {
+			ensure(cur, "fill");
 			return;
 		}
 		if (name === "patternFill") {
@@ -426,7 +419,7 @@ function parse_dxfs(t, styles, themes) {
 			}
 			return;
 		}
-		if (inBorder && (name === "left" || name === "right" || name === "top" || name === "bottom" || name === "diagonal" || name === "vertical" || name === "horizontal")) {
+		if (inBorder && ["left", "right", "top", "bottom", "diagonal", "vertical", "horizontal"].includes(name)) {
 			if (isClose) {
 				borderEdge = null;
 			} else {
@@ -439,57 +432,55 @@ function parse_dxfs(t, styles, themes) {
 			return;
 		}
 
-		if (inFont) {
-			if (name === "b" && !isClose) {
+		if (inFont && !isClose) {
+			if (name === "b") {
 				ensure(cur, "font").bold = true;
 				return;
 			}
-			if (name === "i" && !isClose) {
+			if (name === "i") {
 				ensure(cur, "font").italic = true;
 				return;
 			}
-			if (name === "strike" && !isClose) {
+			if (name === "strike") {
 				ensure(cur, "font").strike = true;
 				return;
 			}
-			if (name === "u" && !isClose) {
+			if (name === "u") {
 				const v = attrs.val;
 				ensure(cur, "font").underline = v ? v : true;
 				return;
 			}
-			if (name === "color" && !isClose) {
+			if (name === "color") {
 				ensure(cur, "font").color = {rgb: "#"+parseColor(attrs, themes).rgb};
 				return;
 			}
-			if (name === "sz" && !isClose && attrs.val != null) {
-				ensure(cur, "font").sz = num(attrs.val);
-				return;
-			}
-			if (name === "name" && !isClose && attrs.val != null) {
-				ensure(cur, "font").name = attrs.val;
-				return;
-			}
-			if (name === "family" && !isClose && attrs.val != null) {
-				ensure(cur, "font").family = num(attrs.val);
-				return;
-			}
-			if (name === "charset" && !isClose && attrs.val != null) {
-				ensure(cur, "font").charset = num(attrs.val);
-				return;
-			}
-			if (name === "scheme" && !isClose && attrs.val != null) {
-				ensure(cur, "font").scheme = attrs.val;
-				return;
+			if (attrs.val != null) {
+				if (name === "sz") {
+					ensure(cur, "font").sz = num(attrs.val);
+					return;
+				}
+				if (name === "name") {
+					ensure(cur, "font").name = attrs.val;
+					return;
+				}
+				if (name === "family") {
+					ensure(cur, "font").family = num(attrs.val);
+					return;
+				}
+				if (name === "charset") {
+					ensure(cur, "font").charset = num(attrs.val);
+					return;
+				}
+				if (name === "scheme") {
+					ensure(cur, "font").scheme = attrs.val;
+					return;
+				}
 			}
 		}
 
-		if (inPatternFill) {
-			if (name === "fgColor" && !isClose) {
-				ensure(cur, "fill").fgColor = {rgb: "#"+parseColor(attrs, themes).rgb};
-				return;
-			}
-			if (name === "bgColor" && !isClose) {
-				ensure(cur, "fill").bgColor = {rgb: "#"+parseColor(attrs, themes).rgb};
+		if (inPatternFill && !isClose) {
+			if (["fgColor", "bgColor"].includes(name)) {
+				ensure(cur, "fill")[name] = {rgb: "#"+parseColor(attrs, themes).rgb};
 				return;
 			}
 		}
@@ -525,11 +516,6 @@ function parse_dxfs(t, styles, themes) {
 			if (attrs.numFmtId != null) n.numFmtId = num(attrs.numFmtId);
 			if (attrs.formatCode != null) n.formatCode = attrs.formatCode;
 			if (Object.keys(n).length) cur.numFmt = n;
-			return;
-		}
-
-		if (name === "extLst") {
-			return;
 		}
 	});
 
