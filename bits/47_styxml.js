@@ -6,8 +6,9 @@ function parse_borders(t, styles, themes, opts) {
 
 	const tagGroups = {
 		ignoredTags: ["<borders", "<borders/>", "</borders>"],
-		borderTags: ["<border", "<border>", "<border/>"],
+		borderTags: ["<border", "<border>"],
 		endBorderTags: ["</border>"],
+		selfClosingBorderTags: ["<border/>"],
 		sideTags: ["<left", "<right", "<top", "<bottom", "<diagonal"],
 		endSideTags: ["</left>", "</right>", "</top>", "</bottom>", "</diagonal>"],
 		selfClosingSideTags: ["<left/>", "<right/>", "<top/>", "<bottom/>", "<diagonal/>"]
@@ -17,7 +18,10 @@ function parse_borders(t, styles, themes, opts) {
 		if (tagGroups.ignoredTags.includes(tag)) {
 			return;
 		}
-		if (tagGroups.borderTags.includes(tag)) {
+		if (tagGroups.selfClosingBorderTags.includes(tag)) {
+			styles.Borders.push({});
+			border = null;
+		} else if (tagGroups.borderTags.includes(tag)) {
 			border = {};
 		} else if (tagGroups.endBorderTags.includes(tag)) {
 			if (border) {
