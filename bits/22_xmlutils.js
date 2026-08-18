@@ -247,7 +247,7 @@ function parseColor(y, themes) {
 		if (y.tint) {
 			color.tint = parseFloat(y.tint);
 		}
-		if (themes.themeElements?.clrScheme) {
+		if (themes.themeElements?.clrScheme?.[color.theme]) {
 			color.rgb = rgb_tint(themes.themeElements.clrScheme[color.theme].rgb, color.tint || 0);
 		}
 	}
