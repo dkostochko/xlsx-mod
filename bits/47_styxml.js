@@ -5,16 +5,16 @@ function parse_borders(t, styles, themes, opts) {
 	let pass = false;
 
 	const tagGroups = {
-		ignoredTags: ["<borders", "<borders/>", "</borders>"],
+		ignoredTags: ["<borders", "<borders>", "<borders/>", "</borders>", "<extLst", "<extLst>", "<extLst/>", "</extLst>", "<color>", "<color/>", "</color>"],
 		borderTags: ["<border", "<border>"],
 		endBorderTags: ["</border>"],
 		selfClosingBorderTags: ["<border/>"],
-		sideTags: ["<left", "<right", "<top", "<bottom", "<diagonal"],
-		endSideTags: ["</left>", "</right>", "</top>", "</bottom>", "</diagonal>"],
-		selfClosingSideTags: ["<left/>", "<right/>", "<top/>", "<bottom/>", "<diagonal/>"]
+		sideTags: ["<left", "<left>", "<right", "<right>", "<top", "<top>", "<bottom", "<bottom>", "<diagonal", "<diagonal>", "<horizontal", "<horizontal>", "<vertical", "<vertical>", "<start", "<start>", "<end", "<end>"],
+		endSideTags: ["</left>", "</right>", "</top>", "</bottom>", "</diagonal>", "</horizontal>", "</vertical>", "</start>", "</end>"],
+		selfClosingSideTags: ["<left/>", "<right/>", "<top/>", "<bottom/>", "<diagonal/>", "<horizontal/>", "<vertical/>", "<start/>", "<end/>"]
 	};
 
-	const handleTag = (tag, y) => {
+	const handleTag = (tag, y, selfClosing) => {
 		if (tagGroups.ignoredTags.includes(tag)) {
 			return;
 		}
@@ -31,6 +31,7 @@ function parse_borders(t, styles, themes, opts) {
 		} else if (tagGroups.sideTags.includes(tag)) {
 			currentProp = tag.slice(1);
 			border[currentProp] = y.style ? { style: y.style } : {};
+			if (selfClosing) currentProp = null;
 		} else if (tagGroups.endSideTags.includes(tag) || tagGroups.selfClosingSideTags.includes(tag)) {
 			currentProp = null;
 		} else if (tag === "<color" && currentProp && border[currentProp]) {
@@ -46,7 +47,7 @@ function parse_borders(t, styles, themes, opts) {
 
 	(t[0].match(tagregex) || []).forEach(x => {
 		const y = parsexmltag(x);
-		handleTag(strip_ns(y[0]), y);
+		handleTag(strip_ns(y[0]), y, /\/>$/.test(x));
 	});
 }
 

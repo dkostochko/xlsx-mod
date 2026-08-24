@@ -10985,16 +10985,16 @@ function parse_borders(t, styles, themes, opts) {
 	let pass = false;
 
 	const tagGroups = {
-		ignoredTags: ["<borders", "<borders/>", "</borders>"],
+		ignoredTags: ["<borders", "<borders>", "<borders/>", "</borders>", "<extLst", "<extLst>", "<extLst/>", "</extLst>", "<color>", "<color/>", "</color>"],
 		borderTags: ["<border", "<border>"],
 		endBorderTags: ["</border>"],
 		selfClosingBorderTags: ["<border/>"],
-		sideTags: ["<left", "<right", "<top", "<bottom", "<diagonal"],
-		endSideTags: ["</left>", "</right>", "</top>", "</bottom>", "</diagonal>"],
-		selfClosingSideTags: ["<left/>", "<right/>", "<top/>", "<bottom/>", "<diagonal/>"]
+		sideTags: ["<left", "<left>", "<right", "<right>", "<top", "<top>", "<bottom", "<bottom>", "<diagonal", "<diagonal>", "<horizontal", "<horizontal>", "<vertical", "<vertical>", "<start", "<start>", "<end", "<end>"],
+		endSideTags: ["</left>", "</right>", "</top>", "</bottom>", "</diagonal>", "</horizontal>", "</vertical>", "</start>", "</end>"],
+		selfClosingSideTags: ["<left/>", "<right/>", "<top/>", "<bottom/>", "<diagonal/>", "<horizontal/>", "<vertical/>", "<start/>", "<end/>"]
 	};
 
-	const handleTag = (tag, y) => {
+	const handleTag = (tag, y, selfClosing) => {
 		if (tagGroups.ignoredTags.includes(tag)) {
 			return;
 		}
@@ -11011,6 +11011,7 @@ function parse_borders(t, styles, themes, opts) {
 		} else if (tagGroups.sideTags.includes(tag)) {
 			currentProp = tag.slice(1);
 			border[currentProp] = y.style ? { style: y.style } : {};
+			if (selfClosing) currentProp = null;
 		} else if (tagGroups.endSideTags.includes(tag) || tagGroups.selfClosingSideTags.includes(tag)) {
 			currentProp = null;
 		} else if (tag === "<color" && currentProp && border[currentProp]) {
@@ -11026,7 +11027,7 @@ function parse_borders(t, styles, themes, opts) {
 
 	(t[0].match(tagregex) || []).forEach(x => {
 		const y = parsexmltag(x);
-		handleTag(strip_ns(y[0]), y);
+		handleTag(strip_ns(y[0]), y, /\/>$/.test(x));
 	});
 }
 
@@ -15990,10 +15991,16 @@ function safe_format(p, fmtid, fillid, borderId, opts, themes, styles, cellForma
 			p.s.fgColor.rgb = color[1];
 			if(opts.WTF) p.s.fgColor.raw_rgb = color[0];
 		}
+		else if (opts.WTF && p.s.fgColor && p.s.fgColor.theme != null && themes.themeElements?.clrScheme?.[p.s.fgColor.theme]) {
+			p.s.fgColor.raw_rgb = themes.themeElements.clrScheme[p.s.fgColor.theme].rgb.toLowerCase();
+		}
 		if (p.s.bgColor && !p.s.bgColor.rgb && !!themes.themeElements) {
 			color = getColor(p.s.bgColor, themes.themeElements);
 			p.s.bgColor.rgb = color[1];
 			if(opts.WTF) p.s.bgColor.raw_rgb = color[0];
+		}
+		else if (opts.WTF && p.s.bgColor && p.s.bgColor.theme != null && themes.themeElements?.clrScheme?.[p.s.bgColor.theme]) {
+			p.s.bgColor.raw_rgb = themes.themeElements.clrScheme[p.s.bgColor.theme].rgb.toLowerCase();
 		}
 		//console.log("Colors", p.s.fgColor, p.s.bgColor);
 		/*if (p.s.fgColor && p.s.fgColor.theme && !p.s.fgColor.rgb) {
@@ -16499,7 +16506,7 @@ return function parse_ws_xml_data(sdata, s, opts, guess, themes, styles, wb) {
 	var sheetStubs = !!opts.sheetStubs;
 	var date1904 = !!((wb||{}).WBProps||{}).date1904;
 	var rowRanges = [];
-	for(var marr = sdata.match(rowregex), mt = 0, marrlen = marr.length; mt != marrlen; ++mt) {
+	for(var marr = sdata.match(rowregex) || [], mt = 0, marrlen = marr.length; mt != marrlen; ++mt) {
 		x = marr[mt].trim();
 		var xlen = x.length;
 		if(xlen === 0) continue;
@@ -17451,7 +17458,7 @@ function parse_ws_bin(data, _opts, idx, rels, wb, themes, styles) {
 					case 'str': p.t = 's'; p.v = val[1]; break;
 					case 'is': p.t = 's'; p.v = val[1].t; break;
 				}
-				if((cf = styles.CellXf[val[0].iStyleRef])) safe_format(p,cf.numFmtId,null,opts, themes, styles, date1904>0);
+				if((cf = styles.CellXf[val[0].iStyleRef])) safe_format(p, cf.numFmtId, null, cf.borderId, opts, themes, styles, cf, date1904 > 0);
 				C = val[0].c == -1 ? C + 1 : val[0].c;
 				if(opts.dense) { if(!s["!data"][R]) s["!data"][R] = []; s["!data"][R][C] = p; }
 				else s[encode_col(C) + rr] = p;

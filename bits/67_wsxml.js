@@ -484,7 +484,7 @@ return function parse_ws_xml_data(sdata/*:string*/, s, opts, guess/*:Range*/, th
 	var sheetStubs = !!opts.sheetStubs;
 	var date1904 = !!((wb||{}).WBProps||{}).date1904;
 	var rowRanges = [];
-	for(var marr = sdata.match(rowregex), mt = 0, marrlen = marr.length; mt != marrlen; ++mt) {
+	for(var marr = sdata.match(rowregex) || [], mt = 0, marrlen = marr.length; mt != marrlen; ++mt) {
 		x = marr[mt].trim();
 		var xlen = x.length;
 		if(xlen === 0) continue;

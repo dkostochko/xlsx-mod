@@ -274,10 +274,16 @@ function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, borderId,
 			p.s.fgColor.rgb = color[1];
 			if(opts.WTF) p.s.fgColor.raw_rgb = color[0];
 		}
+		else if (opts.WTF && p.s.fgColor && p.s.fgColor.theme != null && themes.themeElements?.clrScheme?.[p.s.fgColor.theme]) {
+			p.s.fgColor.raw_rgb = themes.themeElements.clrScheme[p.s.fgColor.theme].rgb.toLowerCase();
+		}
 		if (p.s.bgColor && !p.s.bgColor.rgb && !!themes.themeElements) {
 			color = getColor(p.s.bgColor, themes.themeElements);
 			p.s.bgColor.rgb = color[1];
 			if(opts.WTF) p.s.bgColor.raw_rgb = color[0];
+		}
+		else if (opts.WTF && p.s.bgColor && p.s.bgColor.theme != null && themes.themeElements?.clrScheme?.[p.s.bgColor.theme]) {
+			p.s.bgColor.raw_rgb = themes.themeElements.clrScheme[p.s.bgColor.theme].rgb.toLowerCase();
 		}
 		//console.log("Colors", p.s.fgColor, p.s.bgColor);
 		/*if (p.s.fgColor && p.s.fgColor.theme && !p.s.fgColor.rgb) {
