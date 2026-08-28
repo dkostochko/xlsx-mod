@@ -12,6 +12,9 @@ var marginregex= /<(?:\w:)?pageMargins[^>]*\/>/g;
 var sheetprregex = /<(?:\w:)?sheetPr\b(?:[^>a-z][^>]*)?\/>/;
 var sheetprregex2= /<(?:\w:)?sheetPr[^>]*(?:[\/]|>([\s\S]*)<\/(?:\w:)?sheetPr)>/;
 var svsregex = /<(?:\w:)?sheetViews[^>]*(?:[\/]|>([\s\S]*)<\/(?:\w:)?sheetViews)>/;
+var cfregex = /<(?:\w:)?conditionalFormatting\b[^>]*>[\s\S]*?<\/(?:\w:)?conditionalFormatting>/g;
+var cfruleregex = /<(?:\w:)?cfRule\b[^>]*(?:\/>|>[\s\S]*?<\/(?:\w:)?cfRule>)/g;
+var formularegex = /<(?:\w:)?formula>([\s\S]*?)<\/(?:\w:)?formula>/g;
 
 /* 18.3 Worksheets */
 function parse_ws_xml(data/*:?string*/, opts, idx/*:number*/, rels, wb/*:WBWBProps*/, themes, styles)/*:Worksheet*/ {
@@ -51,7 +54,7 @@ function parse_ws_xml(data/*:?string*/, opts, idx/*:number*/, rels, wb/*:WBWBPro
 	if(opts.cellStyles) {
 		/* 18.3.1.13 col CT_Col */
 		var cols = data1.match(colregex);
-		if(cols) parse_ws_xml_cols(columns, cols);
+		if(cols) parse_ws_xml_cols(columns, cols, s);
 	}
 
 	/* 18.3.1.80 sheetData CT_SheetData ? */
@@ -74,6 +77,9 @@ function parse_ws_xml(data/*:?string*/, opts, idx/*:number*/, rels, wb/*:WBWBPro
 	/* 18.3.1.62 pageMargins CT_PageMargins */
 	var margins = data2.match(marginregex);
 	if(margins) s['!margins'] = parse_ws_xml_margins(parsexmltag(margins[0]));
+
+	var _cf = parse_ws_xml_conditional_formatting(data2, themes);
+	if(_cf.length) s['!conditionalFormatting'] = _cf;
 
 	/* legacyDrawing */
 	var m;
@@ -196,19 +202,160 @@ function write_ws_xml_margins(margin)/*:string*/ {
 	return writextag('pageMargins', null, margin);
 }
 
-function parse_ws_xml_cols(columns, cols) {
+function parseCFVisualBlock(ruleBodyXml, themes) {
+	if (!ruleBodyXml) return null;
+	const m = ruleBodyXml.match(/<(?:colorScale|dataBar)\b[^>]*>([\s\S]*?)<\/(?:colorScale|dataBar)>/i);
+	if (!m) return null;
+
+	const raw = m[0];
+	const inner = m[1] || '';
+
+	const cfvo = [];
+	const cfvoRe = /<cfvo\b[^>]*\/>/gi;
+	let mm;
+	while ((mm = cfvoRe.exec(inner)) !== null) {
+		const tag = parsexmltag(mm[0], true) || {};
+		cfvo.push({
+			type: (tag.type || '').toLowerCase(),
+			val: tag.val != null ? String(tag.val) : undefined,
+		});
+	}
+
+	const colors = [];
+	const colorRe = /<color\b[^>]*\/>/gi;
+	while ((mm = colorRe.exec(inner)) !== null) {
+		const rawTag = parsexmltag(mm[0], true) || {};
+		const parsed = (typeof parseColor === "function") ? parseColor(rawTag, themes) : {};
+		colors.unshift(Object.assign({ raw: rawTag }, parsed));
+	}
+
+	return { raw, cfvo, colors };
+}
+
+function parse_ws_xml_conditional_formatting(xml, themes) {
+	if (!xml) return [];
+
+	const out = [];
+	let match;
+
+	while ((match = cfregex.exec(xml)) !== null) {
+		const block = match[0];
+		const headEnd = block.indexOf(">");
+		if (headEnd < 0) continue;
+
+		const head = block.slice(0, headEnd + 1);
+		const body = block.slice(headEnd + 1);
+
+		const tag = parsexmltag(head, true);
+		const sqref = (tag.sqref || "").trim();
+		if (!sqref) continue;
+
+		const refs = sqref.split(/\s+/).filter(Boolean);
+		const rules = [];
+
+		(body.match(cfruleregex) || []).forEach(ruleStr => {
+			const rHeadEnd = ruleStr.indexOf(">");
+			const rHead = rHeadEnd >= 0 ? ruleStr.slice(0, rHeadEnd + 1) : ruleStr;
+			const rBody = rHeadEnd >= 0 ? ruleStr.slice(rHeadEnd + 1, ruleStr.lastIndexOf("<")) : "";
+
+			const rtag = parsexmltag(rHead, true);
+			const type = rtag.type;
+			const formulas = [];
+			const rank = rtag.rank != null ? parseInt(rtag.rank, 10) : undefined;
+			const percent = rtag.percent != null ? parseInt(rtag.percent, 10) : undefined;
+			const bottom = rtag.bottom != null ? parseInt(rtag.bottom, 10) : undefined;
+
+			const aboveAverage = !Object.prototype.hasOwnProperty.call(rtag, 'aboveAverage');
+			const equalAverage = Object.prototype.hasOwnProperty.call(rtag, 'equalAverage');
+			const stdDev = rtag.stdDev != null ? parseFloat(rtag.stdDev) : null;
+
+			if (rBody) {
+				let formulaMatch;
+				while ((formulaMatch = formularegex.exec(rBody)) !== null) {
+					const formulaText = formulaMatch[1] ? unescapexml(utf8read(formulaMatch[1]), true) : "";
+					if (formulaText) formulas.push(formulaText);
+				}
+			}
+
+			const ruleObj = {
+				type: rtag.type,
+				operator: rtag.operator,
+				dxfId: rtag.dxfId != null ? parseInt(rtag.dxfId, 10) : undefined,
+				priority: rtag.priority != null ? parseInt(rtag.priority, 10) : undefined,
+				stopIfTrue: rtag.stopIfTrue === "1" || rtag.stopIfTrue === "true",
+				timePeriod: rtag.timePeriod
+			};
+
+			if (formulas.length > 0) {
+				ruleObj.formulas = formulas;
+			}
+
+			if (type === 'top10') {
+				ruleObj.topTen = { rank, percent, bottom };
+			}
+
+			if (type === 'colorScale') {
+				ruleObj.colorScaleParsed = parseCFVisualBlock(rBody, themes);
+			}
+
+			if (type === 'dataBar') {
+				ruleObj.colorScaleParsed = parseCFVisualBlock(rBody, themes);
+			}
+
+			if (type === 'aboveAverage') {
+				ruleObj.aboveAverage = { aboveAverage, equalAverage, stdDev };
+			}
+
+			rules.push(ruleObj);
+		});
+
+		out.push({ sqref: refs, rules });
+	}
+
+	return out;
+}
+
+function parse_ws_xml_cols(columns, cols, s) {
 	var seencol = false;
-	for(var coli = 0; coli != cols.length; ++coli) {
+	var colRanges = [];
+	for (var coli = 0; coli != cols.length; ++coli) {
 		var coll = parsexmltag(cols[coli], true);
-		if(coll.hidden) coll.hidden = parsexmlbool(coll.hidden);
-		var colm=parseInt(coll.min, 10)-1, colM=parseInt(coll.max,10)-1;
-		if(coll.outlineLevel) coll.level = (+coll.outlineLevel || 0);
-		delete coll.min; delete coll.max; coll.width = +coll.width;
-		if(!seencol && coll.width) { seencol = true; find_mdw_colw(coll.width); }
+		if (coll.hidden) coll.hidden = parsexmlbool(coll.hidden);
+		var colm = parseInt(coll.min, 10) - 1,
+			colM = parseInt(coll.max, 10) - 1;
+		if (coll.style) {
+			var style = parseInt(coll.style, 10);
+			var last = colRanges[colRanges.length - 1];
+			if (
+				last?.style === style &&
+				colm <= last.to + 1
+			) {
+				last.to = Math.max(last.to, colM);
+			} else {
+				colRanges.push({ from: colm, to: colM, style: style });
+			}
+		}
+		if (coll.outlineLevel) coll.level = +coll.outlineLevel || 0;
+		delete coll.min;
+		delete coll.max;
+		coll.width = +coll.width;
+		if (!seencol && coll.width) {
+			seencol = true;
+			find_mdw_colw(coll.width);
+		}
 		process_col(coll);
-		while(colm <= colM) columns[colm++] = dup(coll);
+		while (colm <= colM) columns[colm++] = dup(coll);
+	}
+
+	if (colRanges.length > 0) {
+		var colStyles = {};
+		colRanges.forEach(function (r) {
+			colStyles[r.from + "-" + r.to] = r.style;
+		});
+		s["!colStyles"] = colRanges;
 	}
 }
+
 function write_ws_xml_cols(ws, cols)/*:string*/ {
 	var o = ["<cols>"], col;
 	for(var i = 0; i != cols.length; ++i) {
@@ -220,7 +367,7 @@ function write_ws_xml_cols(ws, cols)/*:string*/ {
 }
 
 function parse_ws_xml_autofilter(data/*:string*/) {
-	var o = { ref: (data.match(/ref="([^"]*)"/)||[])[1]};
+	var o = { ref: (data.match(/ref=\"([^\"]*)\"/)||[])[1]};
 	return o;
 }
 function write_ws_xml_autofilter(data, ws, wb, idx)/*:string*/ {
@@ -320,7 +467,7 @@ function write_ws_xml_cell(cell/*:Cell*/, ref, ws, opts, idx, wb, date1904)/*:st
 }
 
 var parse_ws_xml_data = /*#__PURE__*/(function() {
-	var cellregex = /<(?:\w+:)?c[ \/>]/, rowregex = /<\/(?:\w+:)?row>/;
+	var cellregex = /<(?:\w+:)?c[ \/>]/, rowregex = /<\w*:?row\b[^>]*\/>|<\w*:?row\b[^>]*>[\s\S]*?<\/\w*:?row>/g;
 	var rregex = /r=["']([^"']*)["']/, isregex = /<(?:\w+:)?is>([\S\s]*?)<\/(?:\w+:)?is>/;
 	var refregex = /ref=["']([^"']*)["']/;
 
@@ -328,7 +475,7 @@ return function parse_ws_xml_data(sdata/*:string*/, s, opts, guess/*:Range*/, th
 	var ri = 0, x = "", cells/*:Array<string>*/ = [], cref/*:?Array<string>*/ = [], idx=0, i=0, cc=0, d="", p/*:any*/;
 	var tag, tagr = 0, tagc = 0;
 	var sstr, ftag;
-	var fmtid = 0, fillid = 0;
+	var fmtid = 0, fillid = 0, borderId = 0;
 	var do_format = Array.isArray(styles.CellXf), cf;
 	var arrayf/*:Array<[Range, string]>*/ = [];
 	var sharedf = [];
@@ -336,7 +483,8 @@ return function parse_ws_xml_data(sdata/*:string*/, s, opts, guess/*:Range*/, th
 	var rows/*:Array<RowInfo>*/ = [], rowobj = {}, rowrite = false;
 	var sheetStubs = !!opts.sheetStubs;
 	var date1904 = !!((wb||{}).WBProps||{}).date1904;
-	for(var marr = sdata.split(rowregex), mt = 0, marrlen = marr.length; mt != marrlen; ++mt) {
+	var rowRanges = [];
+	for(var marr = sdata.match(rowregex) || [], mt = 0, marrlen = marr.length; mt != marrlen; ++mt) {
 		x = marr[mt].trim();
 		var xlen = x.length;
 		if(xlen === 0) continue;
@@ -367,6 +515,17 @@ return function parse_ws_xml_data(sdata/*:string*/, s, opts, guess/*:Range*/, th
 		if(!opts.nodim) {
 			if(guess.s.r > tagr - 1) guess.s.r = tagr - 1;
 			if(guess.e.r < tagr - 1) guess.e.r = tagr - 1;
+		}
+		if (tag.s) {
+			var tagRowIndex = tagr - 1;
+			var style = parseInt(tag.s, 10);
+			var last = rowRanges.at(-1);
+
+			if (last?.style === style && tagRowIndex <= last.to + 1) {
+				last.to = tagRowIndex;
+			} else {
+				rowRanges.push({ from: tagRowIndex, to: tagRowIndex, style: style });
+			}
 		}
 
 		if(opts && opts.cellStyles) {
@@ -497,10 +656,11 @@ return function parse_ws_xml_data(sdata/*:string*/, s, opts, guess/*:Range*/, th
 					if(cf.numFmtId != null) fmtid = cf.numFmtId;
 					if(opts.cellStyles) {
 						if(cf.fillId != null) fillid = cf.fillId;
+						if(cf.borderId != null) borderId = cf.borderId;
 					}
 				}
 			}
-			safe_format(p, fmtid, fillid, opts, themes, styles, cf, date1904);
+			safe_format(p, fmtid, fillid, borderId, opts, themes, styles, cf, date1904);
             if(opts.cellDates && do_format && p.t == 'n' && fmt_is_date(table_fmt[fmtid])) { p.v = numdate(p.v + (date1904 ? 1462 : 0)); p.t = typeof p.v == "number" ? 'n' : 'd'; }
 			if(tag.cm && opts.xlmeta) {
 				var cm = (opts.xlmeta.Cell||[])[+tag.cm-1];
@@ -520,6 +680,9 @@ return function parse_ws_xml_data(sdata/*:string*/, s, opts, guess/*:Range*/, th
 		}
 	}
 	if(rows.length > 0) s['!rows'] = rows;
+	if(Object.keys(rowRanges).length > 0) {
+		s['!rowStyles'] = rowRanges;
+	}
 }; })();
 
 function write_ws_xml_data(ws/*:Worksheet*/, opts, idx/*:number*/, wb/*:Workbook*//*::, rels*/)/*:string*/ {

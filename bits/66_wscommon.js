@@ -229,7 +229,7 @@ function getColor(colorInfo, styles){
     return [color ? color.toLowerCase() : color, tintedColor ? tintedColor.toLowerCase() : tintedColor];
 }
 
-function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, opts, themes, styles, cellFormat, date1904) {
+function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, borderId, opts, themes, styles, cellFormat, date1904) {
 	try {
 		if(opts.cellNF) p.z = table_fmt[fmtid];
 	} catch(e) { if(opts.WTF) throw e; }
@@ -263,6 +263,9 @@ function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, opts, the
 			p.alignment = cellFormat.alignment;
 		}
 	}
+	if (borderId && cellFormat?.applyBorder) {
+		p.borderId = borderId;
+	}
 	if(fillid != null) try {
 		p.s =  styles.Fills[fillid];
 		var color;
@@ -271,10 +274,16 @@ function safe_format(p/*:Cell*/, fmtid/*:number*/, fillid/*:?number*/, opts, the
 			p.s.fgColor.rgb = color[1];
 			if(opts.WTF) p.s.fgColor.raw_rgb = color[0];
 		}
+		else if (opts.WTF && p.s.fgColor && p.s.fgColor.theme != null && themes.themeElements?.clrScheme?.[p.s.fgColor.theme]) {
+			p.s.fgColor.raw_rgb = themes.themeElements.clrScheme[p.s.fgColor.theme].rgb.toLowerCase();
+		}
 		if (p.s.bgColor && !p.s.bgColor.rgb && !!themes.themeElements) {
 			color = getColor(p.s.bgColor, themes.themeElements);
 			p.s.bgColor.rgb = color[1];
 			if(opts.WTF) p.s.bgColor.raw_rgb = color[0];
+		}
+		else if (opts.WTF && p.s.bgColor && p.s.bgColor.theme != null && themes.themeElements?.clrScheme?.[p.s.bgColor.theme]) {
+			p.s.bgColor.raw_rgb = themes.themeElements.clrScheme[p.s.bgColor.theme].rgb.toLowerCase();
 		}
 		//console.log("Colors", p.s.fgColor, p.s.bgColor);
 		/*if (p.s.fgColor && p.s.fgColor.theme && !p.s.fgColor.rgb) {
