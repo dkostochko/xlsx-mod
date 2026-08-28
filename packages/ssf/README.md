@@ -8,16 +8,14 @@ features like international support as well as dedicated support.
 
 ## Installation
 
-With [npm](https://www.npmjs.org/package/ssf):
-
 ```bash
-$ npm install ssf
+$ npm install https://cdn.sheetjs.com/ssf-0.11.3/ssf-0.11.3.tgz
 ```
 
 In the browser:
 
 ```html
-<script src="ssf.js"></script>
+<script src="https://cdn.sheetjs.com/ssf-0.11.3/ssf.js"></script>
 ```
 
 The browser exposes a variable `SSF`
@@ -107,13 +105,3 @@ granted by the Apache 2.0 license are reserved by the Original Author.
 ## Badges
 
 [![Sauce Test Status](https://saucelabs.com/browser-matrix/ssfjs.svg)](https://saucelabs.com/u/ssfjs)
-
-[![Build Status](https://travis-ci.org/SheetJS/ssf.svg?branch=master)](https://travis-ci.org/SheetJS/ssf)
-
-[![Coverage Status](http://img.shields.io/coveralls/SheetJS/ssf/master.svg)](https://coveralls.io/r/SheetJS/ssf?branch=master)
-
-[![NPM Downloads](https://img.shields.io/npm/dt/ssf.svg)](https://npmjs.org/package/ssf)
-
-[![Dependencies Status](https://david-dm.org/sheetjs/ssf/status.svg)](https://david-dm.org/sheetjs/ssf)
-
-[![Analytics](https://ga-beacon.appspot.com/UA-36810333-1/SheetJS/ssf?pixel)](https://github.com/SheetJS/ssf)

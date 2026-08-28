@@ -50,7 +50,13 @@ function read_plaintext_raw(data/*:RawData*/, o/*:ParseOpts*/)/*:Workbook*/ {
 function read_utf16(data/*:RawData*/, o/*:ParseOpts*/)/*:Workbook*/ {
 	var d = data;
 	if(o.type == 'base64') d = Base64_decode(d);
-	d = typeof $cptable !== "undefined" ? $cptable.utils.decode(1200, d.slice(2), 'str') : utf16leread(d.slice(2));
+	if(typeof ArrayBuffer !== "undefined" && data instanceof ArrayBuffer) d = new Uint8Array(data);
+	d = typeof $cptable !== "undefined" ? $cptable.utils.decode(1200, d.slice(2), 'str') : (
+		(has_buf && Buffer.isBuffer(data)) ? data.slice(2).toString("utf16le") :
+		(typeof Uint8Array !== "undefined" && d instanceof Uint8Array) ? (
+			typeof TextDecoder !== "undefined" ? new TextDecoder("utf-16le").decode(d.slice(2)) : utf16lereadu(d.slice(2))
+		) : utf16leread(d.slice(2))
+	);
 	o.type = "binary";
 	return read_plaintext(d, o);
 }

@@ -13,14 +13,18 @@ function rtf_to_sheet(d, opts) {
 }
 function rtf_to_sheet_str(str, opts) {
   var o = opts || {};
-  var ws = o.dense ? [] : {};
-  var rows = str.match(/\\trowd[\s\S]*?\\row\b/g);
+  var ws = {};
+  var dense = o.dense;
+  if (dense)
+    ws["!data"] = [];
+  var rows = str_match_ng(str, "\\trowd", "\\row");
   if (!rows)
     throw new Error("RTF missing table");
   var range = { s: { c: 0, r: 0 }, e: { c: 0, r: rows.length - 1 } };
+  var row = [];
   rows.forEach(function(rowtf, R) {
-    if (Array.isArray(ws))
-      ws[R] = [];
+    if (dense)
+      row = ws["!data"][R] = [];
     var rtfre = /\\[\w\-]+\b/g;
     var last_index = 0;
     var res;
@@ -46,8 +50,8 @@ function rtf_to_sheet_str(str, opts) {
                 cell.w = cell.v;
               cell.v = fuzzynum(cell.v);
             }
-            if (Array.isArray(ws))
-              ws[R][C] = cell;
+            if (dense)
+              row[C] = cell;
             else
               ws[encode_cell({ r: R, c: C })] = cell;
           }
@@ -75,15 +79,17 @@ function sheet_to_rtf(ws, opts) {
   if (!ws["!ref"])
     return o[0] + "}";
   var r = safe_decode_range(ws["!ref"]), cell;
-  var dense = Array.isArray(ws);
+  var dense = ws["!data"] != null, row = [];
   for (var R = r.s.r; R <= r.e.r; ++R) {
     o.push("\\trowd\\trautofit1");
     for (var C = r.s.c; C <= r.e.c; ++C)
       o.push("\\cellx" + (C + 1));
     o.push("\\pard\\intbl");
+    if (dense)
+      row = ws["!data"][R] || [];
     for (C = r.s.c; C <= r.e.c; ++C) {
       var coord = encode_cell({ r: R, c: C });
-      cell = dense ? (ws[R] || [])[C] : ws[coord];
+      cell = dense ? row[C] : ws[coord];
       if (!cell || cell.v == null && (!cell.f || cell.F)) {
         o.push(" \\cell");
         continue;

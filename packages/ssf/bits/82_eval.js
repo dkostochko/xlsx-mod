@@ -1,4 +1,5 @@
 function eval_fmt(fmt/*:string*/, v/*:any*/, opts/*:any*/, flen/*:number*/) {
+	if(typeof v == "number") v = normalize_xl_unsafe(v);
 	var out = [], o = "", i = 0, c = "", lst='t', dt, j, cc;
 	var hr='H';
 	/* Tokenize */
@@ -85,10 +86,11 @@ function eval_fmt(fmt/*:string*/, v/*:any*/, opts/*:any*/, flen/*:number*/) {
 		switch(out[i].t) {
 			case 'h': case 'H': out[i].t = hr; lst='h'; if(bt < 1) bt = 1; break;
 			case 's':
-				if((ssm=out[i].v.match(/\.0+$/))) ss0=Math.max(ss0,ssm[0].length-1);
+				if((ssm=out[i].v.match(/\.0+$/))) { ss0=Math.max(ss0,ssm[0].length-1); bt = 4;}
 				if(bt < 3) bt = 3;
 			/* falls through */
-			case 'd': case 'y': case 'M': case 'e': lst=out[i].t; break;
+			case 'd': case 'y': case 'e': lst=out[i].t; break;
+			case 'M': lst=out[i].t; if(bt < 2) bt = 2; break;
 			case 'm': if(lst === 's') { out[i].t = 'M'; if(bt < 2) bt = 2; } break;
 			case 'X': /*if(out[i].v === "B2");*/
 				break;
@@ -98,19 +100,29 @@ function eval_fmt(fmt/*:string*/, v/*:any*/, opts/*:any*/, flen/*:number*/) {
 				if(bt < 3 && out[i].v.match(/[Ss]/)) bt = 3;
 		}
 	}
+
 	/* time rounding depends on presence of minute / second / usec fields */
+	var _dt;
 	switch(bt) {
 		case 0: break;
 		case 1:
-			/*::if(!dt) break;*/
+		case 2:
+		case 3:
 			if(dt.u >= 0.5) { dt.u = 0; ++dt.S; }
 			if(dt.S >=  60) { dt.S = 0; ++dt.M; }
 			if(dt.M >=  60) { dt.M = 0; ++dt.H; }
+			if(dt.H >=  24) { dt.H = 0; ++dt.D; _dt = parse_date_code(dt.D); _dt.u = dt.u; _dt.S = dt.S; _dt.M = dt.M; _dt.H = dt.H; dt = _dt; }
 			break;
-		case 2:
-			/*::if(!dt) break;*/
-			if(dt.u >= 0.5) { dt.u = 0; ++dt.S; }
+		case 4:
+			switch(ss0) {
+				case 1: dt.u = Math.round(dt.u * 10)/10; break;
+				case 2: dt.u = Math.round(dt.u * 100)/100; break;
+				case 3: dt.u = Math.round(dt.u * 1000)/1000; break;
+			}
+			if(dt.u >=   1) { dt.u = 0; ++dt.S; }
 			if(dt.S >=  60) { dt.S = 0; ++dt.M; }
+			if(dt.M >=  60) { dt.M = 0; ++dt.H; }
+			if(dt.H >=  24) { dt.H = 0; ++dt.D; _dt = parse_date_code(dt.D); _dt.u = dt.u; _dt.S = dt.S; _dt.M = dt.M; _dt.H = dt.H; dt = _dt; }
 			break;
 	}
 

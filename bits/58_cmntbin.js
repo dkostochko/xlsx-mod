@@ -74,6 +74,10 @@ function write_comments_bin(data/*::, opts*/) {
 			if(iauthor.indexOf(c.a) > -1) return;
 			iauthor.push(c.a.slice(0,54));
 			write_record(ba, 0x0278 /* BrtCommentAuthor */, write_BrtCommentAuthor(c.a));
+			if(c.T && c.ID && iauthor.indexOf("tc=" + c.ID) == -1) {
+				iauthor.push("tc=" + c.ID);
+				write_record(ba, 0x0278 /* BrtCommentAuthor */, write_BrtCommentAuthor("tc=" + c.ID));
+			}
 		});
 	});
 	write_record(ba, 0x0277 /* BrtEndCommentAuthors */);
@@ -81,7 +85,11 @@ function write_comments_bin(data/*::, opts*/) {
 	write_record(ba, 0x0279 /* BrtBeginCommentList */);
 	data.forEach(function(comment) {
 		comment[1].forEach(function(c) {
-			c.iauthor = iauthor.indexOf(c.a);
+			var _ia = -1;
+			if(c.ID) _ia = iauthor.indexOf("tc=" + c.ID);
+			if(_ia == -1 && comment[1][0].T && comment[1][0].ID) _ia = iauthor.indexOf("tc=" + comment[1][0].ID);
+			if(_ia == -1) _ia = iauthor.indexOf(c.a);
+			c.iauthor = _ia;
 			var range = {s:decode_cell(comment[0]),e:decode_cell(comment[0])};
 			write_record(ba, 0x027B /* BrtBeginComment */, write_BrtBeginComment([range, c]));
 			if(c.t && c.t.length > 0) write_record(ba, 0x027D /* BrtCommentText */, write_BrtCommentText(c));
